@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "281155017086",
+    "firebase_url": "https://salware-d10d8-default-rtdb.europe-west1.firebasedatabase.app/",
+    "project_id": "salware-d10d8",
+    "storage_bucket": "salware-d10d8.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:281155017086:android:211117c6300f985e763b2f",
+        "android_client_info": {
+          "package_name": "com.test.demibluetoothchatting"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDiqQYA5PRfr3z7jDDxeFOJ8ZNkT-0TDuU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
