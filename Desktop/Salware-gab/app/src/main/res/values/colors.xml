@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+    <color name="sender_color">#674FA3</color>
+    <color name="receiver_color">#A9A9A9</color>
+    <color name="purple_500">#6200EE</color>
+</resources>
