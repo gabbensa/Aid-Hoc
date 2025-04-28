@@ -11,6 +11,8 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.util.ArrayList;
+import java.util.List;
 
 public class ChatSocketHandler {
     private static ChatSocketHandler instance;
@@ -21,6 +23,9 @@ public class ChatSocketHandler {
     private ChatFragment chatFragment;
     private InetAddress groupOwnerAddress;
     private static final String TAG = "ChatSocketHandler";
+    
+    // Ajouter une liste pour stocker les messages en attente
+    private List<String> pendingMessages = new ArrayList<>();
 
     private ChatSocketHandler() {}
 
@@ -33,6 +38,15 @@ public class ChatSocketHandler {
 
     public void setChatFragment(ChatFragment fragment) {
         this.chatFragment = fragment;
+        
+        // Si un nouveau fragment est défini et que nous avons des messages en attente, les livrer
+        if (fragment != null && !pendingMessages.isEmpty()) {
+            Log.d(TAG, "Delivering " + pendingMessages.size() + " pending messages to new fragment");
+            for (String message : pendingMessages) {
+                fragment.onMessageReceived(message);
+            }
+            pendingMessages.clear();
+        }
     }
 
     public boolean isConnected() {
@@ -51,8 +65,11 @@ public class ChatSocketHandler {
             return;
         }
 
-        // Fermer toute connexion existante
-        closeExistingConnections();
+        // Ne pas fermer les connexions existantes si elles sont valides
+        if (isSocketConnected() && readWriteThread != null && readWriteThread.isAlive()) {
+            Log.d(TAG, "Socket already connected, not starting server.");
+            return;
+        }
 
         new Thread(() -> {
             try {
@@ -77,8 +94,11 @@ public class ChatSocketHandler {
     }
 
     public void startClientSocket(InetAddress hostAddress) {
-        // Fermer toute connexion existante
-        closeExistingConnections();
+        // Ne pas fermer les connexions existantes si elles sont valides
+        if (isSocketConnected() && readWriteThread != null && readWriteThread.isAlive()) {
+            Log.d(TAG, "Socket already connected, not reconnecting.");
+            return;
+        }
 
         new Thread(() -> {
             try {
@@ -112,6 +132,7 @@ public class ChatSocketHandler {
         }).start();
     }
 
+    // Modifié pour ne pas fermer les connexions existantes
     private void closeExistingConnections() {
         try {
             if (socket != null && !socket.isClosed()) {
@@ -195,18 +216,21 @@ public class ChatSocketHandler {
                         final String received = new String(buffer, 0, bytes);
                         Log.d(TAG, "Message received: " + received);
 
-                        // Notifier le ChatFragment du message reçu
-                        if (chatFragment != null) {
-                            mainHandler.post(() -> {
+                        // Notifier le ChatFragment du message reçu ou stocker le message si le fragment n'est pas disponible
+                        mainHandler.post(() -> {
+                            if (chatFragment != null) {
                                 try {
                                     chatFragment.onMessageReceived(received);
                                 } catch (Exception e) {
                                     Log.e(TAG, "Error notifying ChatFragment: " + e.getMessage(), e);
+                                    // Si une erreur se produit, stocker le message pour une livraison ultérieure
+                                    pendingMessages.add(received);
                                 }
-                            });
-                        } else {
-                            Log.w(TAG, "ChatFragment is null, cannot deliver message");
-                        }
+                            } else {
+                                Log.w(TAG, "ChatFragment is null, storing message for later delivery");
+                                pendingMessages.add(received);
+                            }
+                        });
                     } else if (bytes < 0) {
                         // -1 indique la fin du flux (connexion fermée)
                         Log.d(TAG, "End of stream reached, connection closed");
@@ -223,18 +247,6 @@ public class ChatSocketHandler {
             // Si on sort de la boucle, c'est que la connexion est perdue
             Log.d(TAG, "ReadWriteThread exiting, connection lost or closed");
             setConnected(false);
-
-            // Notifier le ChatFragment de la perte de connexion
-            if (chatFragment != null) {
-                mainHandler.post(() -> {
-                    try {
-                        // Vous devrez ajouter cette méthode à ChatFragment
-                        // chatFragment.onConnectionLost();
-                    } catch (Exception e) {
-                        Log.e(TAG, "Error notifying ChatFragment of connection loss", e);
-                    }
-                });
-            }
         }
 
         public void write(byte[] bytes) {
@@ -263,9 +275,10 @@ public class ChatSocketHandler {
         Log.d(TAG, "Group owner address set to: " + address.getHostAddress());
     }
 
+    // Modifié pour ne pas fermer les connexions
     public void closeConnection() {
-        Log.d(TAG, "Closing all connections");
-        closeExistingConnections();
-        setConnected(false);
+        Log.d(TAG, "closeConnection called - keeping socket open for future use");
+        // Ne fermez pas les connexions ici, juste marquer que le fragment n'est plus disponible
+        chatFragment = null;
     }
 }

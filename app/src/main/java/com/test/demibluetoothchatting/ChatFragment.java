@@ -322,6 +322,10 @@ public class ChatFragment extends Fragment {
         super.onDestroy();
         if (controller != null) controller.stop();
         if (networkChangeReceiver != null) requireActivity().unregisterReceiver(networkChangeReceiver);
+        
+        // Informer ChatSocketHandler que ce fragment est détruit
+        // mais ne pas fermer la connexion socket
+        ChatSocketHandler.getInstance().setChatFragment(null);
     }
 }
 
