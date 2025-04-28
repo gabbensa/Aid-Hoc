@@ -9,6 +9,7 @@ import android.net.wifi.p2p.WifiP2pInfo;
 import android.net.wifi.p2p.WifiP2pManager;
 import android.os.Bundle;
 import android.os.Handler;
+import android.os.Looper;
 import android.os.Message;
 import android.util.Log;
 import android.view.LayoutInflater;
@@ -30,6 +31,7 @@ import com.test.demibluetoothchatting.Database.DatabaseHelper;
 import com.test.demibluetoothchatting.Receivers.NetworkChangeReceiver;
 
 import java.util.ArrayList;
+import java.util.List;
 
 public class ChatFragment extends Fragment {
     private WifiP2pDevice connectingDevice;
@@ -48,6 +50,14 @@ public class ChatFragment extends Fragment {
 
     private String deviceAddress;
     private String deviceName;
+
+    // Variable pour suivre si nous avons déjà ajouté un séparateur
+    private boolean separatorAdded = false;
+
+    // Liste pour stocker les nouveaux messages
+    private List<String> newMessages = new ArrayList<>();
+    // Handler pour effacer la surbrillance après un délai
+    private Handler highlightHandler = new Handler();
 
     @Nullable
     @Override
@@ -265,15 +275,26 @@ public class ChatFragment extends Fragment {
         return false;
     });
 
-    public void onMessageReceived(String message) {
+    public void onMessageReceived(String message, boolean isDelayed) {
         requireActivity().runOnUiThread(() -> {
             if (connectingDevice != null) {
-                dbHelper.insertMessage(connectingDevice.deviceName, "This Device", message, getCurrentTimestamp(), 0);
+                // Ajoutez un préfixe ou une indication visuelle pour les messages différés
+                String displayMessage = message;
+                if (isDelayed) {
+                    displayMessage = "[Delayed] " + message;
+                }
+                
+                dbHelper.insertMessage(connectingDevice.deviceName, "This Device", displayMessage, getCurrentTimestamp(), 0);
                 loadMessagesFromDatabase(connectingDevice.deviceName);
             } else {
                 Log.w("ChatFragment", "No connected device, cannot save message.");
             }
         });
+    }
+
+    // Gardez la méthode originale pour la compatibilité
+    public void onMessageReceived(String message) {
+        onMessageReceived(message, false);
     }
 
     private String getCurrentTimestamp() {
@@ -287,35 +308,24 @@ public class ChatFragment extends Fragment {
     @Override
     public void onResume() {
         super.onResume();
-        // Vérifier si ChatSocketHandler a déjà une connexion
+        
+        // Informer l'autre appareil que nous sommes dans le chat
         if (ChatSocketHandler.getInstance().isConnected()) {
-            Log.d("ChatFragment", "Connection already established. Not reinitializing.");
-            setStatus("Connected");
-        } else {
-            if (manager != null && channel != null) {
-                manager.requestConnectionInfo(channel, info -> {
-                    if (info.groupFormed) {
-                        if (info.isGroupOwner) {
-                            Log.d("ChatFragment", "Group Owner → starting server socket...");
-                            ChatSocketHandler.getInstance().startServerSocket();
-                            setStatus("Hosting chat...");
-                        } else {
-                            String hostAddress = info.groupOwnerAddress.getHostAddress();
-                            Log.d("ChatFragment", "Client → connecting to " + hostAddress);
-                            ChatSocketHandler.getInstance().startClientSocket(info.groupOwnerAddress);
-                            setStatus("Joining chat...");
-                        }
-                    } else {
-                        Log.d("ChatFragment", "Group not formed");
-                        setStatus("Waiting for group formation...");
-                    }
-                });
-            }
+            ChatSocketHandler.getInstance().sendMessage("DEVICE_ENTERING_CHAT");
         }
+        
+        // Le reste du code onResume...
     }
 
-
-
+    @Override
+    public void onPause() {
+        super.onPause();
+        
+        // Informer l'autre appareil que nous quittons le chat
+        if (ChatSocketHandler.getInstance().isConnected()) {
+            ChatSocketHandler.getInstance().sendMessage("DEVICE_LEAVING_CHAT");
+        }
+    }
 
     @Override
     public void onDestroy() {
@@ -323,9 +333,42 @@ public class ChatFragment extends Fragment {
         if (controller != null) controller.stop();
         if (networkChangeReceiver != null) requireActivity().unregisterReceiver(networkChangeReceiver);
         
+        // Nettoyer le handler
+        highlightHandler.removeCallbacksAndMessages(null);
+        
         // Informer ChatSocketHandler que ce fragment est détruit
-        // mais ne pas fermer la connexion socket
         ChatSocketHandler.getInstance().setChatFragment(null);
+    }
+
+    private void attemptReconnection() {
+        if (connectingDevice != null) {
+            Log.d("ChatFragment", "Attempting to reconnect...");
+            new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                connectToSelectedDevice(connectingDevice.deviceAddress);
+            }, 5000); // Attendre 5 secondes avant de réessayer
+        }
+    }
+
+    public void onNewPendingMessages(int count) {
+        Toast.makeText(getActivity(), "You have " + count + " new messages", Toast.LENGTH_SHORT).show();
+    }
+
+    public void setNewMessages(List<String> messages) {
+        this.newMessages = new ArrayList<>(messages);
+        
+        // Programmer l'effacement de la surbrillance après 5 secondes
+        highlightHandler.removeCallbacksAndMessages(null);
+        highlightHandler.postDelayed(() -> {
+            newMessages.clear();
+            if (chatAdapter != null) {
+                chatAdapter.notifyDataSetChanged();
+            }
+        }, 5000); // 5 secondes
+    }
+
+    // Méthode pour vérifier si un message est nouveau
+    public boolean isNewMessage(String message) {
+        return newMessages.contains(message);
     }
 }
 

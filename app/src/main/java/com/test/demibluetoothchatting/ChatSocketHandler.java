@@ -3,6 +3,7 @@ package com.test.demibluetoothchatting;
 import android.util.Log;
 import android.os.Handler;
 import android.os.Looper;
+import android.widget.Toast;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -27,6 +28,10 @@ public class ChatSocketHandler {
     // Ajouter une liste pour stocker les messages en attente
     private List<String> pendingMessages = new ArrayList<>();
 
+    // Ajoutez ces variables de classe
+    private List<String> undeliveredMessages = new ArrayList<>();
+    private boolean otherDeviceInChat = true; // Supposons initialement que l'autre appareil est dans le chat
+
     private ChatSocketHandler() {}
 
     public static synchronized ChatSocketHandler getInstance() {
@@ -42,6 +47,15 @@ public class ChatSocketHandler {
         // Si un nouveau fragment est défini et que nous avons des messages en attente, les livrer
         if (fragment != null && !pendingMessages.isEmpty()) {
             Log.d(TAG, "Delivering " + pendingMessages.size() + " pending messages to new fragment");
+            
+            // Afficher une notification Toast
+            int messageCount = pendingMessages.size();
+            new Handler(Looper.getMainLooper()).post(() -> {
+                Toast.makeText(fragment.getContext(), 
+                    messageCount + " New messages received",
+                    Toast.LENGTH_LONG).show();
+            });
+            
             for (String message : pendingMessages) {
                 fragment.onMessageReceived(message);
             }
@@ -155,7 +169,44 @@ public class ChatSocketHandler {
         readWriteThread = null;
     }
 
+    // Ajoutez une méthode pour marquer l'état de l'autre appareil
+    public void setOtherDeviceInChat(boolean inChat) {
+        this.otherDeviceInChat = inChat;
+        Log.d(TAG, "Other device in chat: " + inChat);
+        
+        // Si l'autre appareil revient dans le chat, envoyez les messages non livrés
+        if (inChat && !undeliveredMessages.isEmpty()) {
+            sendUndeliveredMessages();
+        }
+    }
+
+    // Méthode pour envoyer les messages non livrés
+    private void sendUndeliveredMessages() {
+        if (isConnected() && !undeliveredMessages.isEmpty()) {
+            Log.d(TAG, "Sending " + undeliveredMessages.size() + " undelivered messages");
+            
+            for (String message : undeliveredMessages) {
+                // Préfixez le message pour indiquer qu'il s'agit d'un message différé
+                sendMessage("DELAYED_MESSAGE:" + message);
+            }
+            undeliveredMessages.clear();
+        }
+    }
+
+    // Modifiez la méthode sendMessage pour gérer les messages non livrés
     public boolean sendMessage(String message) {
+        // Si le message commence par "DELAYED_MESSAGE:", c'est un message différé
+        // que nous envoyons nous-mêmes, donc pas besoin de le stocker à nouveau
+        boolean isDelayedMessage = message.startsWith("DELAYED_MESSAGE:");
+        
+        // Si l'autre appareil n'est pas dans le chat et ce n'est pas un message différé,
+        // stockez le message pour une livraison ultérieure
+        if (!otherDeviceInChat && !isDelayedMessage) {
+            Log.d(TAG, "Other device not in chat, storing message for later delivery: " + message);
+            undeliveredMessages.add(message);
+            return true; // Retournez true car le message a été correctement traité
+        }
+        
         if (readWriteThread != null) {
             try {
                 Log.d("ChatSocketHandler", "Sending message: " + message);
@@ -166,16 +217,31 @@ public class ChatSocketHandler {
                     } catch (Exception e) {
                         Log.e("ChatSocketHandler", "Error in thread sending message: " + e.getMessage(), e);
                         setConnected(false);
+                        
+                        // Si le message n'est pas un message différé, stockez-le pour une livraison ultérieure
+                        if (!isDelayedMessage) {
+                            undeliveredMessages.add(message);
+                        }
                     }
                 }).start();
                 return true;
             } catch (Exception e) {
                 Log.e("ChatSocketHandler", "Error sending message: " + e.getMessage(), e);
                 setConnected(false);
+                
+                // Si le message n'est pas un message différé, stockez-le pour une livraison ultérieure
+                if (!isDelayedMessage) {
+                    undeliveredMessages.add(message);
+                }
                 return false;
             }
         } else {
             Log.e("ChatSocketHandler", "Cannot send message: readWriteThread is null");
+            
+            // Si le message n'est pas un message différé, stockez-le pour une livraison ultérieure
+            if (!isDelayedMessage) {
+                undeliveredMessages.add(message);
+            }
             return false;
         }
     }
@@ -215,20 +281,43 @@ public class ChatSocketHandler {
                     if (bytes > 0) {
                         final String received = new String(buffer, 0, bytes);
                         Log.d(TAG, "Message received: " + received);
-
-                        // Notifier le ChatFragment du message reçu ou stocker le message si le fragment n'est pas disponible
+                        
+                        // Vérifiez si c'est un message de contrôle indiquant l'état de l'autre appareil
+                        if (received.equals("DEVICE_ENTERING_CHAT")) {
+                            setOtherDeviceInChat(true);
+                            continue; // Passez au prochain message
+                        } else if (received.equals("DEVICE_LEAVING_CHAT")) {
+                            setOtherDeviceInChat(false);
+                            continue; // Passez au prochain message
+                        }
+                        
+                        // Vérifiez si c'est un message différé et ajoutez un indicateur
+                        final String messageToDeliver;
+                        final boolean isDelayed;
+                        
+                        if (received.startsWith("DELAYED_MESSAGE:")) {
+                            messageToDeliver = received.substring("DELAYED_MESSAGE:".length());
+                            isDelayed = true;
+                        } else {
+                            messageToDeliver = received;
+                            isDelayed = false;
+                        }
+                        
+                        // Livrez le message au fragment ou stockez-le
                         mainHandler.post(() -> {
                             if (chatFragment != null) {
                                 try {
-                                    chatFragment.onMessageReceived(received);
+                                    // Passez l'indicateur isDelayed au fragment
+                                    chatFragment.onMessageReceived(messageToDeliver, isDelayed);
                                 } catch (Exception e) {
                                     Log.e(TAG, "Error notifying ChatFragment: " + e.getMessage(), e);
-                                    // Si une erreur se produit, stocker le message pour une livraison ultérieure
-                                    pendingMessages.add(received);
+                                    // Stocker le message et son statut
+                                    pendingMessages.add(isDelayed ? "DELAYED:" + messageToDeliver : messageToDeliver);
                                 }
                             } else {
                                 Log.w(TAG, "ChatFragment is null, storing message for later delivery");
-                                pendingMessages.add(received);
+                                // Stocker le message et son statut
+                                pendingMessages.add(isDelayed ? "DELAYED:" + messageToDeliver : messageToDeliver);
                             }
                         });
                     } else if (bytes < 0) {
