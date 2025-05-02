@@ -85,9 +85,6 @@ public class WiFiDirectBroadcastReceiver extends BroadcastReceiver {
                     } else {
                         Log.d(TAG, "Device disconnected");
                         handler.clearConnectedDevices();
-                        Toast.makeText(context,
-                                " Disconnected from peer",
-                                Toast.LENGTH_LONG).show();
                     }
                 }
             }

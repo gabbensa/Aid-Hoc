@@ -3,6 +3,7 @@ package com.test.demibluetoothchatting.Tabs;
 import android.Manifest;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.IntentFilter;
 import android.net.Uri;
@@ -69,6 +70,10 @@ public class messages_tab extends Fragment implements WiFiDirectBroadcastReceive
     private WifiP2pDevice localDevice;
     private static final int PERMISSION_REQUEST_CODE = 100;
 
+    private boolean isFieldUser = false;
+    private Handler autoSearchHandler = new Handler();
+    private static final long AUTO_SEARCH_INTERVAL = 10000; // 10 secondes entre chaque recherche
+
     public messages_tab() {}
 
     @Nullable
@@ -77,6 +82,12 @@ public class messages_tab extends Fragment implements WiFiDirectBroadcastReceive
                            @Nullable Bundle savedInstanceState) {
         View main_view = inflater.inflate(R.layout.messages_tab, container, false);
         Log.d("MessagesTab", "onCreateView started");
+
+        // Vérifier si nous sommes un utilisateur "field"
+        SharedPreferences prefs = getActivity().getSharedPreferences("UserPrefs", Context.MODE_PRIVATE);
+        String userType = prefs.getString("userType", "");
+        isFieldUser = "field".equals(userType);
+        Log.d("MessagesTab", "User type: " + userType + ", isFieldUser: " + isFieldUser);
 
         // Initialize ListView and adapter for available devices
         ListView deviceList = main_view.findViewById(R.id.discoveredDeviceList);
@@ -164,7 +175,29 @@ public class messages_tab extends Fragment implements WiFiDirectBroadcastReceive
             Toast.makeText(getContext(), "Error initializing WiFi Direct", Toast.LENGTH_LONG).show();
         }
 
+        // Si c'est un utilisateur field, démarrer la recherche automatique
+        if (isFieldUser) {
+            startAutoDeviceDiscovery();
+        }
+
         return main_view;
+    }
+
+    @Override
+    public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
+        super.onViewCreated(view, savedInstanceState);
+        
+        // Lancer automatiquement la recherche d'appareils après un court délai
+        // pour s'assurer que tous les composants sont initialisés
+        new Handler().postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                if (isAdded() && getActivity() != null) {
+                    Log.d("MessagesTab", "Starting automatic device discovery");
+                    startAutoDeviceDiscovery();
+                }
+            }
+        }, 1000); // Délai de 1 seconde pour s'assurer que tout est bien initialisé
     }
 
     private boolean isWifiDirectSupported() {
@@ -489,6 +522,11 @@ public class messages_tab extends Fragment implements WiFiDirectBroadcastReceive
         }
 
         requireActivity().registerReceiver(wifiDirectReceiver, intentFilter);
+
+        // Redémarrer la recherche automatique lorsque le fragment reprend
+        if (isFieldUser) {
+            startAutoDeviceDiscovery();
+        }
     }
 
     @Override
@@ -500,6 +538,11 @@ public class messages_tab extends Fragment implements WiFiDirectBroadcastReceive
             }
         } catch (Exception e) {
             Log.e("WiFiDirect", "Error in onPause: " + e.getMessage());
+        }
+
+        // Arrêter la recherche automatique lorsque le fragment est en pause
+        if (isFieldUser) {
+            stopAutoDeviceDiscovery();
         }
     }
 
@@ -787,6 +830,53 @@ public class messages_tab extends Fragment implements WiFiDirectBroadcastReceive
         });
     }
 
+    // Méthode pour démarrer la recherche automatique des appareils
+    private void startAutoDeviceDiscovery() {
+        // Démarrer immédiatement la première recherche
+        discoverPeers();
+        
+        // Configurer une recherche périodique toutes les 30 secondes
+        final Handler handler = new Handler();
+        final int delay = 30000; // 30 secondes
+        
+        handler.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                if (isAdded() && getActivity() != null) {  // Vérifier que le fragment est toujours attaché
+                    Log.d("MessagesTab", "Auto-discovering peers...");
+                    discoverPeers();
+                    handler.postDelayed(this, delay);
+                }
+            }
+        }, delay);
+        
+        // Afficher un message pour informer l'utilisateur
+        if (getContext() != null) {
+            Toast.makeText(getContext(), "Auto-discovery started", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    // Méthode pour arrêter la recherche automatique
+    private void stopAutoDeviceDiscovery() {
+        autoSearchHandler.removeCallbacksAndMessages(null);
+    }
+
+    // Méthode existante pour découvrir les appareils
+    public void discoverPeers() {
+        manager.discoverPeers(channel, new WifiP2pManager.ActionListener() {
+            @Override
+            public void onSuccess() {
+                Log.d("MessagesTab", "Discovery initiated");
+                Toast.makeText(getContext(), "Discovery initiated", Toast.LENGTH_SHORT).show();
+            }
+
+            @Override
+            public void onFailure(int reasonCode) {
+                Log.d("MessagesTab", "Discovery failed: " + reasonCode);
+                Toast.makeText(getContext(), "Discovery failed", Toast.LENGTH_SHORT).show();
+            }
+        });
+    }
 
 }
 
