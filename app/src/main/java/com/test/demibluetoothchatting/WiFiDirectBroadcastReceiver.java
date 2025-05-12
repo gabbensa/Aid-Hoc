@@ -12,6 +12,9 @@ import android.net.wifi.p2p.WifiP2pManager;
 import android.util.Log;
 import android.widget.Toast;
 import androidx.core.app.ActivityCompat;
+import android.content.SharedPreferences;
+
+import com.test.demibluetoothchatting.Database.DatabaseHelper;
 
 public class WiFiDirectBroadcastReceiver extends BroadcastReceiver {
     private static final String TAG = "WiFiDirectBR";
@@ -48,14 +51,56 @@ public class WiFiDirectBroadcastReceiver extends BroadcastReceiver {
                     manager.requestPeers(channel, handler::onPeersAvailable);
                 }
             }
-
         } else if (WifiP2pManager.WIFI_P2P_THIS_DEVICE_CHANGED_ACTION.equals(action)) {
             WifiP2pDevice device = intent.getParcelableExtra(WifiP2pManager.EXTRA_WIFI_P2P_DEVICE);
             if (device != null) {
-                handler.updateLocalDevice(device);
-                Log.d(TAG, "Local device updated: " + device.deviceName);
+                Log.d(TAG, "Device changed - Name: " + device.deviceName + ", Address: " + device.deviceAddress);
+
+                // Stocker l'adresse MAC P2P locale dans les SharedPreferences
+                SharedPreferences prefs = context.getSharedPreferences("UserPrefs", Context.MODE_PRIVATE);
+                String oldAddress = prefs.getString("deviceAddress", "");
+                String newAddress = device.deviceAddress;
+
+                if (!newAddress.equals(oldAddress)) {
+                    Log.d(TAG, "Device address changed from " + oldAddress + " to " + newAddress);
+                    prefs.edit().putString("deviceAddress", newAddress).apply();
+
+                    // Mettre à jour l'association username/device si l'adresse est valide
+                    if (!newAddress.equals("02:00:00:00:00:00") && !newAddress.isEmpty()) {
+                        String username = prefs.getString("username", "");
+                        String deviceName = prefs.getString("deviceName", "");
+
+                        if (!username.isEmpty() && !deviceName.isEmpty()) {
+                            Log.d(TAG, "Updating username/device association - Username: " + username +
+                                      ", Device: " + deviceName + ", Address: " + newAddress);
+
+                            DatabaseHelper dbHelper = new DatabaseHelper(context);
+                            dbHelper.associateUsernameWithDevice(username, deviceName, newAddress);
+
+                            // Si la socket est déjà connectée, envoyer le USER_INFO
+                            ChatSocketHandler socketHandler = ChatSocketHandler.getInstance();
+                            socketHandler.setAppContext(context);
+
+                            if (socketHandler.isConnected()) {
+                                Log.d(TAG, "Socket is connected, sending USER_INFO");
+                                socketHandler.sendUserInfo();
+                            } else {
+                                Log.d(TAG, "Socket is not connected, USER_INFO will be sent when connection is established");
+                            }
+                        } else {
+                            Log.w(TAG, "Cannot update association: username or deviceName is empty");
+                        }
+                    } else {
+                        Log.w(TAG, "Invalid device address: " + newAddress);
+                    }
+                } else {
+                    Log.d(TAG, "Device address unchanged: " + newAddress);
+                }
             }
 
+            // Notifier le handler
+            handler.updateLocalDevice(device);
+            Log.d(TAG, "Local device updated: " + device.deviceName);
 
         } else if (WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION.equals(action)) {
             Log.d(TAG, "P2P connection changed");
@@ -64,21 +109,33 @@ public class WiFiDirectBroadcastReceiver extends BroadcastReceiver {
                 if (networkInfo != null) {
                     Log.d(TAG, "NetworkInfo state: " + networkInfo.getState());
                     handler.handleConnectionChanged(networkInfo);
+
                     if (networkInfo.isConnected()) {
                         Log.d(TAG, "Device connected");
                         if (ActivityCompat.checkSelfPermission(context,
                                 Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
                             manager.requestGroupInfo(channel, group -> {
                                 if (group != null) {
-                                    // On notifie d'abord le propriétaire du groupe
+                                    // Notifier le propriétaire du groupe
                                     handler.updateConnectedDevice(group.getOwner());
-                                    // Puis on notifie chaque client du groupe
+                                    // Notifier chaque client du groupe
                                     for (WifiP2pDevice client : group.getClientList()) {
                                         handler.updateConnectedDevice(client);
                                     }
-                                    Toast.makeText(context,
-                                            " Connected to group",
-                                            Toast.LENGTH_LONG).show();
+
+                                    // Vérifier si nous devons envoyer le USER_INFO
+                                    SharedPreferences prefs = context.getSharedPreferences("UserPrefs", Context.MODE_PRIVATE);
+                                    String deviceAddress = prefs.getString("deviceAddress", "");
+                                    if (!deviceAddress.equals("02:00:00:00:00:00") && !deviceAddress.isEmpty()) {
+                                        ChatSocketHandler socketHandler = ChatSocketHandler.getInstance();
+                                        socketHandler.setAppContext(context);
+                                        if (socketHandler.isConnected()) {
+                                            Log.d(TAG, "Connection established, sending USER_INFO");
+                                            socketHandler.sendUserInfo();
+                                        }
+                                    }
+
+                                    Toast.makeText(context, "Connected to group", Toast.LENGTH_LONG).show();
                                 }
                             });
                         }
@@ -89,7 +146,6 @@ public class WiFiDirectBroadcastReceiver extends BroadcastReceiver {
                 }
             }
         }
-
     }
 
     public interface WiFiDirectHandler {
@@ -99,9 +155,5 @@ public class WiFiDirectBroadcastReceiver extends BroadcastReceiver {
         void onPeersAvailable(WifiP2pDeviceList peerList);
         void handleConnectionChanged(NetworkInfo networkInfo);
     }
-
-
-
-
 }
 

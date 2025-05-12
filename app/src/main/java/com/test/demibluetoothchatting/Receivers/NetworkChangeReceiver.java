@@ -8,7 +8,10 @@ import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
 import android.os.Handler;
 import android.widget.Toast;
+import androidx.work.OneTimeWorkRequest;
+import androidx.work.WorkManager;
 
+import com.test.demibluetoothchatting.Service.MessageSyncWorker;
 import com.test.demibluetoothchatting.Service.SyncService;
 
 // NetworkChangeReceiver listens for changes in network connectivity
@@ -31,16 +34,13 @@ public class NetworkChangeReceiver extends BroadcastReceiver {
 
             // If the network is now connected and debouncing is not in progress
             if (isConnected && !isDebouncing) {
-                isDebouncing = true; // Set the debouncing flag to true
+                isDebouncing = true;
 
-                // Start the SyncService to sync data when network becomes available
-                Intent syncIntent = new Intent(context, SyncService.class);
-                context.startService(syncIntent);
+                WorkManager.getInstance(context)
+                        .enqueue(new OneTimeWorkRequest.Builder(MessageSyncWorker.class).build());
 
-                // Display a Toast message to inform the user that the sync has started
                 Toast.makeText(context, "Network Available - Sync Started", Toast.LENGTH_LONG).show();
 
-                // Use a handler to reset the debouncing flag after a delay (DEBOUNCE_DELAY)
                 new Handler().postDelayed(() -> isDebouncing = false, DEBOUNCE_DELAY);
             }
         }

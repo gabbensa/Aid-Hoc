@@ -1,14 +1,15 @@
-
 package com.test.demibluetoothchatting;
 
 import android.annotation.SuppressLint;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.net.wifi.p2p.WifiP2pConfig;
 import android.net.wifi.p2p.WifiP2pDevice;
 import android.net.wifi.p2p.WifiP2pManager;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
+import android.util.Log;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
@@ -45,6 +46,9 @@ public class MainActivity extends AppCompatActivity {
     private WifiP2pDevice connectingDevice;
     private String deviceName;
     private TextView txtDeviceName;
+    private String deviceAddress; // Pour stocker l'adresse MAC du device
+
+    private WifiP2pDevice localDevice;
 
     @SuppressLint({"MissingInflatedId"})
     @Override
@@ -73,18 +77,22 @@ public class MainActivity extends AppCompatActivity {
         controller = new Controller(handler);
 
         Intent intent = getIntent();
-        if (intent != null && intent.hasExtra("device_name")) {
+        if (intent != null && intent.hasExtra("device_name") && intent.hasExtra("device_address")) {
             deviceName = intent.getStringExtra("device_name");
+            deviceAddress = intent.getStringExtra("device_address");
 
-            if (deviceName != null) {
-                loadMessagesFromDatabase(deviceName);
-                txtDeviceName.setText(deviceName);
+            if (deviceName != null && deviceAddress != null) {
+                // Récupérer le username associé au device
+                String username = dbHelper.getUsernameForDevice(deviceAddress);
+                String displayName = (username != null) ? username : deviceName;
+                txtDeviceName.setText(displayName);
+                loadMessagesFromDatabase(deviceAddress);
             }
         }
 
         btnConnect.setOnClickListener(v -> {
             if (deviceName != null) {
-                connectToSelectedDevice(deviceName);
+                connectToSelectedDevice(deviceAddress);
             } else {
                 Toast.makeText(MainActivity.this, "No device selected!", Toast.LENGTH_SHORT).show();
             }
@@ -100,14 +108,14 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
-    private void connectToSelectedDevice(String deviceName) {
+    private void connectToSelectedDevice(String deviceAddress) {
         WifiP2pConfig config = new WifiP2pConfig();
-        config.deviceAddress = deviceName; // Use the address from discovered peers
+        config.deviceAddress = deviceAddress;
 
         manager.connect(channel, config, new WifiP2pManager.ActionListener() {
             @Override
             public void onSuccess() {
-                Toast.makeText(MainActivity.this, "Connecting to " + deviceName, Toast.LENGTH_SHORT).show();
+                Toast.makeText(MainActivity.this, "Connecting to " + deviceAddress, Toast.LENGTH_SHORT).show();
             }
 
             @Override
@@ -121,14 +129,18 @@ public class MainActivity extends AppCompatActivity {
         status.setText(s);
     }
 
-    private void loadMessagesFromDatabase(String deviceName) {
-        String senderName = "This Device";
-        String receiverName = deviceName;
+    private void loadMessagesFromDatabase(String deviceAddress) {
+        String senderUsername = dbHelper.getUsernameForDevice(getLocalDeviceAddress());
+        String receiverUsername = dbHelper.getUsernameForDevice(deviceAddress);
+        
+        // Fallback sur les noms de devices si pas de username
+        if (senderUsername == null) senderUsername = getLocalDeviceName();
+        if (receiverUsername == null) receiverUsername = deviceName;
 
-        if (!senderName.isEmpty() && !receiverName.isEmpty()) {
+        if (!senderUsername.isEmpty() && !receiverUsername.isEmpty()) {
             chatMessages.clear();
-            chatMessages = dbHelper.getMessagesForDevice(senderName, receiverName);
-            chatAdapter = new ChatAdapter(chatMessages, senderName);
+            chatMessages = dbHelper.getMessagesForDevice(senderUsername, receiverUsername);
+            chatAdapter = new ChatAdapter(chatMessages, senderUsername);
             recyclerView.setAdapter(chatAdapter);
             recyclerView.scrollToPosition(chatMessages.size() - 1);
         }
@@ -143,6 +155,17 @@ public class MainActivity extends AppCompatActivity {
         if (message.length() > 0) {
             byte[] send = message.getBytes();
             controller.write(send);
+            
+            // Récupérer les usernames
+            String senderUsername = dbHelper.getUsernameForDevice(getLocalDeviceAddress());
+            String receiverUsername = dbHelper.getUsernameForDevice(deviceAddress);
+            
+            // Fallback sur les noms de devices si pas de username
+            if (senderUsername == null) senderUsername = getLocalDeviceName();
+            if (receiverUsername == null) receiverUsername = deviceName;
+            
+            dbHelper.insertMessage(senderUsername, receiverUsername, message, getCurrentTimestamp(), 0);
+            loadMessagesFromDatabase(deviceAddress);
         }
     }
 
@@ -152,7 +175,7 @@ public class MainActivity extends AppCompatActivity {
                 switch (msg.arg1) {
                     case Controller.CONNECTED:
                         setStatus("Connected to: " + connectingDevice.deviceName);
-                        loadMessagesFromDatabase(connectingDevice.deviceName);
+                        loadMessagesFromDatabase(deviceAddress);
                         break;
                     case Controller.CONNECTING:
                         setStatus("Connecting...");
@@ -166,19 +189,23 @@ public class MainActivity extends AppCompatActivity {
 
             case message_write:
                 String writeMessage = new String((byte[]) msg.obj);
-                dbHelper.insertMessage("This Device", connectingDevice.deviceName, writeMessage, getCurrentTimestamp(), 0);
-                loadMessagesFromDatabase(connectingDevice.deviceName);
+                String senderUsername = dbHelper.getUsernameForDevice(getLocalDeviceAddress());
+                if (senderUsername == null) senderUsername = getLocalDeviceName();
+                dbHelper.insertMessage(senderUsername, connectingDevice.deviceName, writeMessage, getCurrentTimestamp(), 0);
+                loadMessagesFromDatabase(deviceAddress);
                 break;
 
             case message_read:
                 String readMessage = new String((byte[]) msg.obj, 0, msg.arg1);
-                dbHelper.insertMessage(connectingDevice.deviceName, "This Device", readMessage, getCurrentTimestamp(), 0);
-                loadMessagesFromDatabase(connectingDevice.deviceName);
+                String receiverUsername = dbHelper.getUsernameForDevice(getLocalDeviceAddress());
+                if (receiverUsername == null) receiverUsername = getLocalDeviceName();
+                dbHelper.insertMessage(connectingDevice.deviceName, receiverUsername, readMessage, getCurrentTimestamp(), 0);
+                loadMessagesFromDatabase(deviceAddress);
                 break;
 
             case MESSAGE_DEVICE_OBJECT:
                 connectingDevice = (WifiP2pDevice) msg.obj;
-                loadMessagesFromDatabase(connectingDevice.deviceName);
+                loadMessagesFromDatabase(deviceAddress);
                 Toast.makeText(getApplicationContext(), "Connected to " + connectingDevice.deviceName, Toast.LENGTH_SHORT).show();
                 break;
 
@@ -191,6 +218,20 @@ public class MainActivity extends AppCompatActivity {
 
     private String getCurrentTimestamp() {
         return new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(new java.util.Date());
+    }
+
+    private String getLocalDeviceAddress() {
+        if (localDevice != null) {
+            return localDevice.deviceAddress;
+        }
+        return null;
+    }
+
+    private String getLocalDeviceName() {
+        if (localDevice != null) {
+            return localDevice.deviceName;
+        }
+        return null;
     }
 
     @Override

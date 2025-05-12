@@ -1,12 +1,15 @@
 package com.test.demibluetoothchatting.Database;
 
 // Import necessary Android and Java components
+import static android.content.ContentValues.TAG;
+
 import android.annotation.SuppressLint;
 import android.content.ContentValues;
 import android.content.Context;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteOpenHelper;
+import android.util.Log;
 
 import com.test.demibluetoothchatting.ChatMessage;
 import com.test.demibluetoothchatting.User;
@@ -35,30 +38,47 @@ public class DatabaseHelper extends SQLiteOpenHelper {
     public static final String MESSAGE_COL_5 = "TIMESTAMP";    // Timestamp when the message was sent
     public static final String MESSAGE_COL_6 = "SYNCED";       // Sync status (0 = unsynced, 1 = synced)
 
+    // Dans DatabaseHelper.java, ajouter après les constantes existantes
+    public static final String USER_DEVICES_TABLE_NAME = "user_devices_table";
+    public static final String USER_DEVICES_COL_1 = "ID";              // Primary Key
+    public static final String USER_DEVICES_COL_2 = "USERNAME";        // Username
+    public static final String USER_DEVICES_COL_3 = "DEVICE_NAME";     // Nom de l'appareil
+    public static final String USER_DEVICES_COL_4 = "DEVICE_ADDRESS";  // Adresse MAC
+    public static final String USER_DEVICES_COL_5 = "LAST_UPDATED";    // Dernière mise à jour
+
     // Constructor for initializing the database helper with the context and database name
     public DatabaseHelper(Context context) {
-        super(context, DATABASE_NAME, null, 4);
+        super(context, DATABASE_NAME, null, 5);
     }
 
     // onCreate is called when the database is created for the first time
     @Override
     public void onCreate(SQLiteDatabase db) {
-        // Create users table
+        // Tables existantes
         db.execSQL("CREATE TABLE " + USER_TABLE_NAME + " (ID INTEGER PRIMARY KEY AUTOINCREMENT, FULLNAME TEXT, USERNAME TEXT, PASSWORD TEXT, USERTYPE TEXT)");
-        // Create messages table
         db.execSQL("CREATE TABLE " + MESSAGE_TABLE_NAME + " (ID INTEGER PRIMARY KEY AUTOINCREMENT, SENDER TEXT, RECEIVER TEXT, MESSAGE TEXT, TIMESTAMP DATETIME DEFAULT CURRENT_TIMESTAMP, SYNCED INTEGER DEFAULT 0)");
+        
+        // Nouvelle table pour l'association username-device
+        db.execSQL("CREATE TABLE " + USER_DEVICES_TABLE_NAME + " (" + USER_DEVICES_COL_1 + " INTEGER PRIMARY KEY AUTOINCREMENT, " + USER_DEVICES_COL_2 + " TEXT, " + USER_DEVICES_COL_3 + " TEXT, " + USER_DEVICES_COL_4 + " TEXT, " + USER_DEVICES_COL_5 + " DATETIME DEFAULT CURRENT_TIMESTAMP)");
     }
 
     // onUpgrade is called when the database needs to be upgraded, such as when the schema changes
     @Override
     public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
-        // Drop old tables if they exist and recreate them
-        db.execSQL("DROP TABLE IF EXISTS " + USER_TABLE_NAME);
-        db.execSQL("DROP TABLE IF EXISTS " + MESSAGE_TABLE_NAME);
-        if (oldVersion < 4) { // Assume the new version is 4
+        if (oldVersion < 4) {
+            // Ajouter la colonne USERTYPE si nécessaire
             db.execSQL("ALTER TABLE " + USER_TABLE_NAME + " ADD COLUMN USERTYPE TEXT");
         }
-        onCreate(db); // Recreate the database tables
+        
+        if (oldVersion < 5) {
+            // Créer la nouvelle table user_devices_table si elle n'existe pas
+            db.execSQL("CREATE TABLE IF NOT EXISTS " + USER_DEVICES_TABLE_NAME + " (" 
+                + USER_DEVICES_COL_1 + " INTEGER PRIMARY KEY AUTOINCREMENT, "
+                + USER_DEVICES_COL_2 + " TEXT, "
+                + USER_DEVICES_COL_3 + " TEXT, "
+                + USER_DEVICES_COL_4 + " TEXT, "
+                + USER_DEVICES_COL_5 + " DATETIME DEFAULT CURRENT_TIMESTAMP)");
+        }
     }
 
     // Insert a new message into the messages table
@@ -210,6 +230,121 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         }
 
         return user; // Return the user object or null if not found
+    }
+
+    public String getUsernameByMac(String macAddress) {
+        SQLiteDatabase db = this.getReadableDatabase();
+        Cursor cursor = db.rawQuery("SELECT FULLNAME FROM " + USER_TABLE_NAME + " WHERE MAC_ADDRESS = ?", new String[]{macAddress});
+
+        if (cursor.moveToFirst()) {
+            String username = cursor.getString(0);
+            cursor.close();
+            return username;
+        }
+        cursor.close();
+        return null;
+    }
+
+    // Méthode pour associer un username à un device
+    public boolean associateUsernameWithDevice(String username, String deviceName, String deviceAddress) {
+        Log.d(TAG, "Associating username/device - username: " + username + ", deviceName: " + deviceName + ", deviceAddress: " + deviceAddress);
+        
+        if (username == null || username.isEmpty() || deviceName == null || deviceName.isEmpty() || deviceAddress == null || deviceAddress.isEmpty()) {
+            Log.e(TAG, "Invalid parameters for association");
+            return false;
+        }
+
+        SQLiteDatabase db = this.getWritableDatabase();
+        boolean success = false;
+
+        try {
+            // Vérifier si une association existe déjà pour cette adresse
+            Cursor cursor = db.query(USER_DEVICES_TABLE_NAME,
+                    new String[]{"id", "username"},
+                    USER_DEVICES_COL_4 + " = ?",
+                    new String[]{deviceAddress},
+                    null, null, null);
+
+            if (cursor != null && cursor.moveToFirst()) {
+                // Mettre à jour l'association existante
+                int id = cursor.getInt(cursor.getColumnIndexOrThrow("ID"));
+                String oldUsername = cursor.getString(cursor.getColumnIndexOrThrow("USERNAME"));
+                
+                Log.d(TAG, "Updating existing association for device " + deviceAddress + 
+                          " - Old username: " + oldUsername + ", New username: " + username);
+                
+                ContentValues values = new ContentValues();
+                values.put(USER_DEVICES_COL_2, username);
+                values.put(USER_DEVICES_COL_3, deviceName);
+                values.put(USER_DEVICES_COL_4, deviceAddress);
+                values.put(USER_DEVICES_COL_5, System.currentTimeMillis());
+
+                success = db.update(USER_DEVICES_TABLE_NAME, values, USER_DEVICES_COL_1 + " = ?", new String[]{String.valueOf(id)}) > 0;
+            } else {
+                // Créer une nouvelle association
+                Log.d(TAG, "Creating new association for device " + deviceAddress);
+                
+                ContentValues values = new ContentValues();
+                values.put(USER_DEVICES_COL_2, username);
+                values.put(USER_DEVICES_COL_3, deviceName);
+                values.put(USER_DEVICES_COL_4, deviceAddress);
+                values.put(USER_DEVICES_COL_5, System.currentTimeMillis());
+
+                success = db.insert(USER_DEVICES_TABLE_NAME, null, values) != -1;
+            }
+
+            if (cursor != null) {
+                cursor.close();
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error associating username with device: " + e.getMessage(), e);
+            success = false;
+        }
+
+        Log.d(TAG, "Association result: " + (success ? "success" : "failed"));
+        return success;
+    }
+
+    // Méthode pour obtenir le username associé à un device
+    public String getUsernameForDevice(String deviceAddress) {
+        SQLiteDatabase db = this.getReadableDatabase();
+        Log.d("DatabaseHelper", "Recherche du username pour deviceAddress: " + deviceAddress);
+        
+        Cursor cursor = db.query(USER_DEVICES_TABLE_NAME,
+                new String[]{USER_DEVICES_COL_2},
+                USER_DEVICES_COL_4 + " = ?",
+                new String[]{deviceAddress},
+                null, null, null);
+        
+        Log.d("DatabaseHelper", "Nombre de résultats trouvés: " + cursor.getCount());
+        
+        if (cursor.moveToFirst()) {
+            String username = cursor.getString(0);
+            Log.d("DatabaseHelper", "Username trouvé: " + username);
+            cursor.close();
+            return username;
+        }
+        Log.d("DatabaseHelper", "Aucun username trouvé pour ce device");
+        cursor.close();
+        return null;
+    }
+
+    // Méthode pour obtenir le device associé à un username
+    public String getDeviceForUsername(String username) {
+        SQLiteDatabase db = this.getReadableDatabase();
+        Cursor cursor = db.query(USER_DEVICES_TABLE_NAME,
+                new String[]{USER_DEVICES_COL_4},
+                USER_DEVICES_COL_2 + " = ?",
+                new String[]{username},
+                null, null, null);
+        
+        if (cursor.moveToFirst()) {
+            String deviceAddress = cursor.getString(0);
+            cursor.close();
+            return deviceAddress;
+        }
+        cursor.close();
+        return null;
     }
 
 }

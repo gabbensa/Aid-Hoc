@@ -3,6 +3,7 @@ package com.test.demibluetoothchatting;
 import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.IntentFilter;
+import android.content.SharedPreferences;
 import android.net.wifi.p2p.WifiP2pConfig;
 import android.net.wifi.p2p.WifiP2pDevice;
 import android.net.wifi.p2p.WifiP2pInfo;
@@ -90,8 +91,13 @@ public class ChatFragment extends Fragment {
         if (args != null) {
             deviceName = args.getString("device_name");
             deviceAddress = args.getString("device_address");
-            txtDeviceName.setText(deviceName);
-            loadMessagesFromDatabase(deviceName);
+            
+            // Récupérer le username associé au device
+            String username = dbHelper.getUsernameForDevice(deviceAddress);
+            String displayName = (username != null) ? username : deviceName;
+            txtDeviceName.setText(displayName);
+            
+            loadMessagesFromDatabase(deviceAddress);
 
             if (connectingDevice == null && deviceName != null && deviceAddress != null) {
                 connectingDevice = new WifiP2pDevice();
@@ -118,17 +124,14 @@ public class ChatFragment extends Fragment {
             manager.requestConnectionInfo(channel, info -> {
                 if (info.groupFormed) {
                     if (info.isGroupOwner) {
-                        Log.d("ChatFragment", "Group Owner → starting ServerSocket");
+
                         ChatSocketHandler.getInstance().startServerSocket();
-                        setStatus("Hosting chat...");
+
                     } else {
-                        String hostAddress = info.groupOwnerAddress.getHostAddress();
-                        Log.d("ChatFragment", "Client → connecting to " + hostAddress);
                         ChatSocketHandler.getInstance().startClientSocket(info.groupOwnerAddress);
                         setStatus("Joining chat...");
                     }
                 } else {
-                    Log.d("ChatFragment", "Group not formed");
                     setStatus("Waiting for group formation...");
                 }
             });
@@ -136,8 +139,6 @@ public class ChatFragment extends Fragment {
             Log.d("ChatFragment", "Connection already established. Not reinitializing.");
             setStatus("Connected");
         }
-
-
 
         return rootView;
     }
@@ -163,8 +164,9 @@ public class ChatFragment extends Fragment {
     }
 
     private void loadMessagesFromDatabase(String deviceName) {
-        chatMessages = dbHelper.getMessagesForDevice("This Device", deviceName);
-        chatAdapter = new ChatAdapter(chatMessages, "This Device");
+        String currentUserName = getUserName();
+        chatMessages = dbHelper.getMessagesForDevice(currentUserName, deviceName);
+        chatAdapter = new ChatAdapter(chatMessages, currentUserName);
         recyclerView.setAdapter(chatAdapter);
         recyclerView.scrollToPosition(chatMessages.size() - 1);
     }
@@ -205,16 +207,58 @@ public class ChatFragment extends Fragment {
         boolean sent = ChatSocketHandler.getInstance().sendMessage(message);
 
         if (sent) {
-            Log.d("ChatFragment", "Message sent via ChatSocketHandler");
+
             // Enregistrer le message dans la base de données
             if (connectingDevice != null) {
-                dbHelper.insertMessage("This Device", connectingDevice.deviceName, message, getCurrentTimestamp(), 0);
+                // Obtenir le nom d'utilisateur actuel au lieu d'utiliser "This Device"
+                String currentUserName = getUserName();
+
+                dbHelper.insertMessage(currentUserName, connectingDevice.deviceName, message, getCurrentTimestamp(), 0);
                 loadMessagesFromDatabase(connectingDevice.deviceName);
+
+                // Déclencher une synchronisation immédiate après l'envoi d'un message
+                triggerImmediateSync();
             }
         } else {
-            Log.d("ChatFragment", "Failed to send via ChatSocketHandler");
             Toast.makeText(getActivity(), "Failed to send message", Toast.LENGTH_SHORT).show();
         }
+    }
+
+    // Ajouter cette méthode pour obtenir le nom d'utilisateur
+    private String getUserName() {
+        // Essayer d'obtenir le nom d'utilisateur des préférences partagées
+        SharedPreferences prefs = requireActivity().getSharedPreferences("UserPrefs", Context.MODE_PRIVATE);
+        String userName = prefs.getString("userName", null);
+
+        // Si aucun nom d'utilisateur n'est défini, utiliser le nom du modèle de l'appareil
+        if (userName == null || userName.isEmpty()) {
+            userName = android.os.Build.MODEL;
+            // Sauvegarder ce nom pour une utilisation future
+            prefs.edit().putString("userName", userName).apply();
+        }
+
+        return userName;
+    }
+
+    // Ajouter cette nouvelle méthode pour déclencher la synchronisation immédiate
+    private void triggerImmediateSync() {
+
+        // Créer une contrainte pour s'assurer que l'appareil est connecté à Internet
+        androidx.work.Constraints constraints = new androidx.work.Constraints.Builder()
+                .setRequiredNetworkType(androidx.work.NetworkType.CONNECTED)
+                .build();
+
+        // Créer une demande de travail unique avec les contraintes
+        androidx.work.OneTimeWorkRequest syncWork = new androidx.work.OneTimeWorkRequest.Builder(com.test.demibluetoothchatting.Service.MessageSyncWorker.class)
+                .setConstraints(constraints)
+                .build();
+
+        // Envoyer la demande de travail au WorkManager
+        androidx.work.WorkManager.getInstance(requireContext()).enqueueUniqueWork(
+                "immediate_sync",
+                androidx.work.ExistingWorkPolicy.REPLACE,
+                syncWork
+        );
     }
 
     private final Handler handler = new Handler(msg -> {
@@ -283,8 +327,11 @@ public class ChatFragment extends Fragment {
                 if (isDelayed) {
                     displayMessage = "[Delayed] " + message;
                 }
-                
-                dbHelper.insertMessage(connectingDevice.deviceName, "This Device", displayMessage, getCurrentTimestamp(), 0);
+
+                // Obtenir le nom d'utilisateur actuel
+                String currentUserName = getUserName();
+
+                dbHelper.insertMessage(connectingDevice.deviceName, currentUserName, displayMessage, getCurrentTimestamp(), 0);
                 loadMessagesFromDatabase(connectingDevice.deviceName);
             } else {
                 Log.w("ChatFragment", "No connected device, cannot save message.");
@@ -308,22 +355,21 @@ public class ChatFragment extends Fragment {
     @Override
     public void onResume() {
         super.onResume();
-        
+
         // Informer l'autre appareil que nous sommes dans le chat
         if (ChatSocketHandler.getInstance().isConnected()) {
-            ChatSocketHandler.getInstance().sendMessage("DEVICE_ENTERING_CHAT");
+
         }
-        
-        // Le reste du code onResume...
+
+
     }
 
     @Override
     public void onPause() {
         super.onPause();
-        
+
         // Informer l'autre appareil que nous quittons le chat
         if (ChatSocketHandler.getInstance().isConnected()) {
-            ChatSocketHandler.getInstance().sendMessage("DEVICE_LEAVING_CHAT");
         }
     }
 
@@ -332,10 +378,10 @@ public class ChatFragment extends Fragment {
         super.onDestroy();
         if (controller != null) controller.stop();
         if (networkChangeReceiver != null) requireActivity().unregisterReceiver(networkChangeReceiver);
-        
+
         // Nettoyer le handler
         highlightHandler.removeCallbacksAndMessages(null);
-        
+
         // Informer ChatSocketHandler que ce fragment est détruit
         ChatSocketHandler.getInstance().setChatFragment(null);
     }
@@ -355,7 +401,7 @@ public class ChatFragment extends Fragment {
 
     public void setNewMessages(List<String> messages) {
         this.newMessages = new ArrayList<>(messages);
-        
+
         // Programmer l'effacement de la surbrillance après 5 secondes
         highlightHandler.removeCallbacksAndMessages(null);
         highlightHandler.postDelayed(() -> {

@@ -47,5 +47,7 @@ dependencies {
     // Firebase and FirebaseUI dependencies
     implementation("com.firebaseui:firebase-ui-database:8.0.1")
     implementation("com.google.firebase:firebase-database:20.0.5")
+    implementation("androidx.work:work-runtime:2.9.0")
+
 }
 

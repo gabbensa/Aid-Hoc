@@ -75,13 +75,13 @@ public class DevicesActivity extends AppCompatActivity implements
 
         discoveredDeviceList.setOnItemClickListener((parent, view, position, id) -> {
             String item = availableDevicesAdapter.getItem(position);
-            Log.d(TAG, "Item clicked: " + item);
+
             if (item != null && item.contains("\n")) {
                 String[] parts = item.split("\n");
                 if (parts.length == 2) {
                     String selectedAddress = parts[1].trim();
                     for (WifiP2pDevice device : peers) {
-                        Log.d(TAG, "Comparing with: " + device.deviceAddress);
+
                         if (device.deviceAddress.equals(selectedAddress)) {
                             connectToDevice(device);
                             break;
@@ -99,12 +99,11 @@ public class DevicesActivity extends AppCompatActivity implements
         super.onResume();
         receiver = new WiFiDirectBroadcastReceiver(manager, channel, this);
         registerReceiver(receiver, intentFilter);
-        Log.d(TAG, "Receiver registered");
+
 
         // Resynchroniser l’état de connexion
         manager.requestConnectionInfo(channel, info -> {
             if (info.groupFormed) {
-                Log.d(TAG, "Reconnected on resume to: " + info.groupOwnerAddress);
                 startChat();
             }
         });
@@ -116,10 +115,9 @@ public class DevicesActivity extends AppCompatActivity implements
         try {
             if (receiver != null) {
                 unregisterReceiver(receiver);
-                Log.d(TAG, "Receiver unregistered");
             }
         } catch (Exception e) {
-            Log.e(TAG, "Error in onPause: " + e.getMessage());
+
         }
     }
 
@@ -158,13 +156,11 @@ public class DevicesActivity extends AppCompatActivity implements
         manager.stopPeerDiscovery(channel, new WifiP2pManager.ActionListener() {
             @Override
             public void onSuccess() {
-                Log.d(TAG, "Discovery stopped before connection attempt");
                 initiateConnection(config, device);
             }
 
             @Override
             public void onFailure(int reason) {
-                Log.e(TAG, "Failed to stop discovery: " + reason);
                 initiateConnection(config, device);
             }
         });
@@ -179,7 +175,6 @@ public class DevicesActivity extends AppCompatActivity implements
         manager.connect(channel, config, new WifiP2pManager.ActionListener() {
             @Override
             public void onSuccess() {
-                Log.d(TAG, "Connection initiated to " + device.deviceName);
                 Toast.makeText(DevicesActivity.this,
                         "Connecting to " + device.deviceName,
                         Toast.LENGTH_SHORT).show();
@@ -187,7 +182,6 @@ public class DevicesActivity extends AppCompatActivity implements
 
             @Override
             public void onFailure(int reason) {
-                Log.e(TAG, "Connection failed: " + reason);
                 Toast.makeText(DevicesActivity.this,
                         "Connection failed: " + reason,
                         Toast.LENGTH_LONG).show();
@@ -201,7 +195,6 @@ public class DevicesActivity extends AppCompatActivity implements
     public void updateConnectedDevice(WifiP2pDevice device) {
         // Si le device correspond au localDevice, on ne l'ajoute pas
         if (localDevice != null && device.deviceAddress.equals(localDevice.deviceAddress)) {
-            Log.d(TAG, "Skipping update for local device: " + device.deviceName);
             return;
         }
         runOnUiThread(() -> {
@@ -239,15 +232,11 @@ public class DevicesActivity extends AppCompatActivity implements
     @Override
     public void handleConnectionChanged(NetworkInfo networkInfo) {
         if (networkInfo != null && networkInfo.isConnected()) {
-            Log.d(TAG, "Connection re-established");
             manager.requestConnectionInfo(channel, info -> {
                 if (info.groupFormed) {
                     startChat();
                 }
             });
-        } else {
-            Log.w(TAG, "WiFi P2P temporarily disconnected (probably tab switch)");
-            // Vous pouvez éventuellement mettre à jour l'UI ici si nécessaire
         }
     }
 
@@ -277,7 +266,7 @@ public class DevicesActivity extends AppCompatActivity implements
     public void startChat() {
         runOnUiThread(() -> {
             new AlertDialog.Builder(this)
-                    .setTitle("✅ Connected!")
+                    .setTitle(" Connected!")
                     .setMessage("You are now connected and ready to chat.")
                     .setPositiveButton("OK", null)
                     .show();

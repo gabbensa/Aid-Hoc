@@ -1,12 +1,16 @@
-
 package com.test.demibluetoothchatting;
 
 import android.Manifest;
 import android.annotation.SuppressLint;
+import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.net.wifi.WifiInfo;
+import android.net.wifi.WifiManager;
 import android.os.Build;
 import android.os.Bundle;
+import android.util.Log;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
@@ -73,15 +77,26 @@ public class LoginActivity extends AppCompatActivity {
                     User user = db.getUserById(userId);
                     String userType = user.getUserType();
 
+                    // Sauvegarder les informations d'utilisateur dans les SharedPreferences
+                    SharedPreferences prefs = getSharedPreferences("UserPrefs", MODE_PRIVATE);
+                    SharedPreferences.Editor editor = prefs.edit();
+                    editor.putString("username", username);
+                    editor.putString("deviceName", Build.MANUFACTURER + " " + Build.MODEL);
+                    editor.apply();
+
+                    Log.d("LOGIN_ASSOC", "username=" + username + " | deviceName=" + Build.MANUFACTURER + " " + Build.MODEL);
+
                     Toast.makeText(LoginActivity.this, "Login successful", Toast.LENGTH_SHORT).show();
 
-                    // Store login information
+                    // Store login information (garder toutes les informations existantes)
                     Controller.PutData(LoginActivity.this, "uid", String.valueOf(userId));
                     Controller.PutData(LoginActivity.this, "userType", userType);
+                    Controller.PutData(LoginActivity.this, "username", username);
+                    Controller.PutData(LoginActivity.this, "device_name", Build.MANUFACTURER + " " + Build.MODEL);
 
                     redirectUser(userType);
                 } else {
-                    Toast.makeText(LoginActivity.this, "Invalid credentials", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(LoginActivity.this, "Invalid username or password", Toast.LENGTH_SHORT).show();
                 }
             }
         });
@@ -94,6 +109,9 @@ public class LoginActivity extends AppCompatActivity {
                 startActivity(intent);
             }
         });
+
+        // Set app context for ChatSocketHandler
+        ChatSocketHandler.getInstance().setAppContext(getApplicationContext());
     }
 
     private boolean hasNecessaryPermissions() {
@@ -161,6 +179,17 @@ public class LoginActivity extends AppCompatActivity {
             }
         } else {
             Toast.makeText(this, "Session expired. Please log in again.", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private String getMacAddress() {
+        try {
+            WifiManager wifiManager = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+            WifiInfo wifiInfo = wifiManager.getConnectionInfo();
+            return wifiInfo.getMacAddress();
+        } catch (Exception e) {
+            Log.e("LoginActivity", "Error getting MAC address: " + e.getMessage());
+            return "00:00:00:00:00:00";
         }
     }
 }
