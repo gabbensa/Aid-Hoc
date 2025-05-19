@@ -54,47 +54,25 @@ public class WiFiDirectBroadcastReceiver extends BroadcastReceiver {
         } else if (WifiP2pManager.WIFI_P2P_THIS_DEVICE_CHANGED_ACTION.equals(action)) {
             WifiP2pDevice device = intent.getParcelableExtra(WifiP2pManager.EXTRA_WIFI_P2P_DEVICE);
             if (device != null) {
-                Log.d(TAG, "Device changed - Name: " + device.deviceName + ", Address: " + device.deviceAddress);
-
-                // Stocker l'adresse MAC P2P locale dans les SharedPreferences
-                SharedPreferences prefs = context.getSharedPreferences("UserPrefs", Context.MODE_PRIVATE);
-                String oldAddress = prefs.getString("deviceAddress", "");
                 String newAddress = device.deviceAddress;
+                Log.d(TAG, "Device changed - Name: " + device.deviceName + ", Address: " + newAddress);
 
-                if (!newAddress.equals(oldAddress)) {
-                    Log.d(TAG, "Device address changed from " + oldAddress + " to " + newAddress);
-                    prefs.edit().putString("deviceAddress", newAddress).apply();
+                // Vérifier si l'adresse MAC a changé et est valide
+                if (!newAddress.equals("02:00:00:00:00:00") && !newAddress.isEmpty()) {
+                    Log.d(TAG, "Valid device address received: " + newAddress);
 
-                    // Mettre à jour l'association username/device si l'adresse est valide
-                    if (!newAddress.equals("02:00:00:00:00:00") && !newAddress.isEmpty()) {
-                        String username = prefs.getString("username", "");
-                        String deviceName = prefs.getString("deviceName", "");
+                    // Mettre à jour les préférences avec la nouvelle adresse MAC
+                    SharedPreferences prefs = context.getSharedPreferences("UserPrefs", Context.MODE_PRIVATE);
+                    String oldAddress = prefs.getString("deviceAddress", "");
 
-                        if (!username.isEmpty() && !deviceName.isEmpty()) {
-                            Log.d(TAG, "Updating username/device association - Username: " + username +
-                                      ", Device: " + deviceName + ", Address: " + newAddress);
-
-                            DatabaseHelper dbHelper = new DatabaseHelper(context);
-                            dbHelper.associateUsernameWithDevice(username, deviceName, newAddress);
-
-                            // Si la socket est déjà connectée, envoyer le USER_INFO
-                            ChatSocketHandler socketHandler = ChatSocketHandler.getInstance();
-                            socketHandler.setAppContext(context);
-
-                            if (socketHandler.isConnected()) {
-                                Log.d(TAG, "Socket is connected, sending USER_INFO");
-                                socketHandler.sendUserInfo();
-                            } else {
-                                Log.d(TAG, "Socket is not connected, USER_INFO will be sent when connection is established");
-                            }
-                        } else {
-                            Log.w(TAG, "Cannot update association: username or deviceName is empty");
-                        }
-                    } else {
-                        Log.w(TAG, "Invalid device address: " + newAddress);
+                    if (!newAddress.equals(oldAddress)) {
+                        Log.d(TAG, "Updating stored device address from " + oldAddress + " to " + newAddress);
+                        SharedPreferences.Editor editor = prefs.edit();
+                        editor.putString("deviceAddress", newAddress);
+                        editor.apply();
                     }
                 } else {
-                    Log.d(TAG, "Device address unchanged: " + newAddress);
+                    Log.w(TAG, "Invalid device address received: " + newAddress);
                 }
             }
 
@@ -126,7 +104,7 @@ public class WiFiDirectBroadcastReceiver extends BroadcastReceiver {
                                     // Vérifier si nous devons envoyer le USER_INFO
                                     SharedPreferences prefs = context.getSharedPreferences("UserPrefs", Context.MODE_PRIVATE);
                                     String deviceAddress = prefs.getString("deviceAddress", "");
-                                    if (!deviceAddress.equals("02:00:00:00:00:00") && !deviceAddress.isEmpty()) {
+                                    if (deviceAddress != null && !deviceAddress.equals("02:00:00:00:00:00") && !deviceAddress.isEmpty()) {
                                         ChatSocketHandler socketHandler = ChatSocketHandler.getInstance();
                                         socketHandler.setAppContext(context);
                                         if (socketHandler.isConnected()) {

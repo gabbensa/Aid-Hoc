@@ -43,7 +43,7 @@ public class ChatFragment extends Fragment {
     private NetworkChangeReceiver networkChangeReceiver;
 
     private TextView status;
-    private Button btnConnect;
+
     private RecyclerView recyclerView;
     private ChatAdapter chatAdapter;
     private ArrayList<ChatMessage> chatMessages;
@@ -70,7 +70,6 @@ public class ChatFragment extends Fragment {
         dbHelper = new DatabaseHelper(getActivity());
 
         status = rootView.findViewById(R.id.status);
-        btnConnect = rootView.findViewById(R.id.btn_connect);
         EditText inputLayout = rootView.findViewById(R.id.input_message);
         recyclerView = rootView.findViewById(R.id.list);
         recyclerView.setLayoutManager(new LinearLayoutManager(getActivity()));
@@ -91,13 +90,8 @@ public class ChatFragment extends Fragment {
         if (args != null) {
             deviceName = args.getString("device_name");
             deviceAddress = args.getString("device_address");
-            
-            // Récupérer le username associé au device
-            String username = dbHelper.getUsernameForDevice(deviceAddress);
-            String displayName = (username != null) ? username : deviceName;
-            txtDeviceName.setText(displayName);
-            
-            loadMessagesFromDatabase(deviceAddress);
+            txtDeviceName.setText(deviceName);
+            loadMessagesFromDatabase(deviceName);
 
             if (connectingDevice == null && deviceName != null && deviceAddress != null) {
                 connectingDevice = new WifiP2pDevice();
@@ -106,9 +100,7 @@ public class ChatFragment extends Fragment {
             }
         }
 
-        btnConnect.setOnClickListener(v -> {
-            if (deviceAddress != null) connectToSelectedDevice(deviceAddress);
-        });
+
 
         rootView.findViewById(R.id.btn_send).setOnClickListener(v -> {
             if (inputLayout.getText().toString().isEmpty()) {
@@ -139,6 +131,8 @@ public class ChatFragment extends Fragment {
             Log.d("ChatFragment", "Connection already established. Not reinitializing.");
             setStatus("Connected");
         }
+
+
 
         return rootView;
     }
@@ -325,7 +319,7 @@ public class ChatFragment extends Fragment {
                 // Ajoutez un préfixe ou une indication visuelle pour les messages différés
                 String displayMessage = message;
                 if (isDelayed) {
-                    displayMessage = "[Delayed] " + message;
+                    displayMessage =  message;
                 }
 
                 // Obtenir le nom d'utilisateur actuel
@@ -356,11 +350,6 @@ public class ChatFragment extends Fragment {
     public void onResume() {
         super.onResume();
 
-        // Informer l'autre appareil que nous sommes dans le chat
-        if (ChatSocketHandler.getInstance().isConnected()) {
-
-        }
-
 
     }
 
@@ -368,9 +357,7 @@ public class ChatFragment extends Fragment {
     public void onPause() {
         super.onPause();
 
-        // Informer l'autre appareil que nous quittons le chat
-        if (ChatSocketHandler.getInstance().isConnected()) {
-        }
+
     }
 
     @Override

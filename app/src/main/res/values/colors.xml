@@ -2,7 +2,8 @@
 <resources>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
-    <color name="sender_color">#674FA3</color>
-    <color name="receiver_color">#A9A9A9</color>
-    <color name="purple_500">#6200EE</color>
+    <color name="accent">#D4C9BE</color>
+    <color name="background">#F4F0EA</color>
+    <color name="dark">#030303</color>
+    <color name="primary">#003369</color>
 </resources>

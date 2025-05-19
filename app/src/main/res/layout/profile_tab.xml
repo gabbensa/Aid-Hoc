@@ -10,21 +10,18 @@
     <androidx.appcompat.widget.Toolbar
         android:id="@+id/toolbar"
         android:layout_width="match_parent"
-        app:contentInsetStart="10dp"
+        android:layout_height="87dp"
         app:contentInsetRight="10dp"
-        android:layout_height="?attr/actionBarSize">
+        app:contentInsetStart="10dp">
 
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
+        <ImageView
+            android:layout_width="300dp"
+            android:layout_height="125dp"
             android:layout_centerInParent="true"
             android:layout_gravity="center"
-            android:fontFamily="@font/comforta_ebold"
-            android:text="@string/app_name"
-            android:textColor="#674FA3"
-            android:textSize="35sp"
-            android:textStyle="bold" />
-
+            android:contentDescription="@string/app_name"
+            android:scaleType="fitCenter"
+            android:src="@drawable/logo_text" />
 
     </androidx.appcompat.widget.Toolbar>
 
@@ -101,7 +98,7 @@
                 android:layout_gravity="center"
                 android:fontFamily="@font/comforta_ebold"
 
-                android:textColor="#000" />
+                android:textColor="@color/dark" />
 
             <RelativeLayout
                 android:layout_width="wrap_content"

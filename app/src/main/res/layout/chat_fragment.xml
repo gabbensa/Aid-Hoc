@@ -4,20 +4,17 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/activity_main"
     android:layout_width="match_parent"
-    android:background="@color/white"
+    android:background="@color/background"
     android:layout_height="match_parent"
     android:orientation="vertical">
-
-
 
     <LinearLayout
         android:id="@+id/toolbar"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:background="#674FA3"
-        android:padding="10dp"
-        app:contentInsetStart="0dp"
-        >
+        android:background="@color/primary"
+        android:elevation="4dp"
+        android:padding="12dp">
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -28,19 +25,17 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="5dp"
-                android:layout_marginBottom="5dp"
-                >
+                android:layout_marginBottom="5dp">
 
                 <ImageView
                     android:id="@+id/btn_back"
-                    android:layout_width="20dp"
-                    android:layout_height="20dp"
+                    android:layout_width="24dp"
+                    android:layout_height="24dp"
                     android:layout_centerVertical="true"
                     android:layout_alignParentStart="true"
                     android:layout_marginLeft="10dp"
+                    android:tint="@color/white"
                     android:background="@drawable/ic_baseline_arrow_back_ios_24" />
-
-
 
                 <TextView
                     android:id="@+id/txt_device_name"
@@ -54,12 +49,10 @@
                     android:hint="Device Name"
                     android:maxLines="1"
                     android:singleLine="true"
-                    android:textColorHint="#fff"
+                    android:textColorHint="#B3FFFFFF"
                     android:textColor="@color/white"
                     android:textSize="20sp" />
-
             </RelativeLayout>
-
         </LinearLayout>
     </LinearLayout>
 
@@ -73,21 +66,12 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_gravity="center"
-            android:textSize="20dp"
-            android:textColor="#000"
+            android:textSize="16sp"
+            android:textColor="@color/primary"
             android:fontFamily="@font/comforta_ebold"
             android:layout_marginTop="10dp"
             android:text="Not Connected" />
 
-        <Button
-            android:id="@+id/btn_connect"
-            android:layout_width="200dp"
-            android:layout_margin="10dp"
-            android:layout_gravity="center"
-            android:fontFamily="@font/comforta_ebold"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
-            android:text="Connect" />
     </LinearLayout>
 
     <androidx.recyclerview.widget.RecyclerView
@@ -96,16 +80,17 @@
         android:layout_height="match_parent"
         android:layout_weight="1"
         android:layout_marginBottom="5dp"
-        />
-
+        android:clipToPadding="false"
+        android:padding="8dp" />
 
     <RelativeLayout
         android:id="@+id/unblocked_panel"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_alignParentBottom="true"
-        android:background="#fff"
-        android:padding="4dp">
+        android:background="@color/white"
+        android:elevation="4dp"
+        android:padding="8dp">
 
         <LinearLayout
             android:id="@+id/btn_privacy"
@@ -114,14 +99,12 @@
             android:layout_marginLeft="1dp"
             android:layout_marginRight="1dp"
             android:layout_marginBottom="1dp"
-            app:cardBackgroundColor="#EFEFEF"
-            app:cardCornerRadius="0dp">
+            android:background="@drawable/message_input_background">
 
             <RelativeLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:background="@drawable/box_style_message">
-
+                android:padding="8dp">
 
                 <ImageView
                     android:id="@+id/btn_send"
@@ -130,8 +113,8 @@
                     android:layout_alignParentRight="true"
                     android:layout_centerVertical="true"
                     android:layout_marginRight="10dp"
-                    android:background="@drawable/icon_send"
-                    />
+                    android:tint="@color/primary"
+                    android:background="@drawable/icon_send" />
 
                 <EditText
                     android:id="@+id/input_message"
@@ -153,34 +136,4 @@
             </RelativeLayout>
         </LinearLayout>
     </RelativeLayout>
-
-    <!--    <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="70dp"
-            android:layout_weight="0.1"
-            android:orientation="horizontal">
-
-            <com.google.android.material.textfield.TextInputLayout
-                android:id="@+id/input_layout"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_gravity="center"
-                android:layout_weight="0.8">
-
-                <EditText
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:hint="Input some text" />
-            </com.google.android.material.textfield.TextInputLayout>
-
-            <Button
-                android:id="@+id/btn_send"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_gravity="center"
-                android:textSize="10dp"
-                android:layout_weight="0.2"
-                android:layout_margin="10dp"
-                android:text="send" />
-        </LinearLayout>-->
 </LinearLayout>

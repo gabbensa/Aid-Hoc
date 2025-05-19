@@ -30,13 +30,14 @@ public class ChatSocketHandler {
     private ChatFragment chatFragment;
     private InetAddress groupOwnerAddress;
     private static final String TAG = "ChatSocketHandler";
-    
-    // Ajouter une liste pour stocker les messages en attente
+
+    // Modifier le type de pendingMessages
     private List<String> pendingMessages = new ArrayList<>();
+    private List<ChatMessage> pendingChatMessages = new ArrayList<>();
 
     // Ajoutez ces variables de classe
     private List<String> undeliveredMessages = new ArrayList<>();
-    private boolean otherDeviceInChat = true; // Supposons initialement que l'autre appareil est dans le chat
+    private boolean otherDeviceInChat = true;
 
     private Context appContext;
 
@@ -51,22 +52,23 @@ public class ChatSocketHandler {
         }
         return instance;
     }
+    
 
     public void setChatFragment(ChatFragment fragment) {
         this.chatFragment = fragment;
-        
+
         // Si un nouveau fragment est défini et que nous avons des messages en attente, les livrer
         if (fragment != null && !pendingMessages.isEmpty()) {
             Log.d(TAG, "Delivering " + pendingMessages.size() + " pending messages to new fragment");
-            
+
             // Afficher une notification Toast
             int messageCount = pendingMessages.size();
             new Handler(Looper.getMainLooper()).post(() -> {
-                Toast.makeText(fragment.getContext(), 
+                Toast.makeText(fragment.getContext(),
                     messageCount + " New messages received",
                     Toast.LENGTH_LONG).show();
             });
-            
+
             for (String message : pendingMessages) {
                 fragment.onMessageReceived(message);
             }
@@ -320,7 +322,6 @@ public class ChatSocketHandler {
             Log.d(TAG, "ReadWriteThread initialized");
         }
 
-
         @Override
         public void run() {
             Log.d(TAG, "ReadWriteThread started");
@@ -336,72 +337,68 @@ public class ChatSocketHandler {
 
                     bytes = inputStream.read(buffer);
                     if (bytes > 0) {
-                        String received = new String(buffer, 0, bytes);
+                        final String received = new String(buffer, 0, bytes);
                         Log.d(TAG, "Message received: " + received);
 
-                        if (received.startsWith("USER_INFO:")) {
-                            Log.d(TAG, "Received USER_INFO: " + received);
-
-                            String[] parts = received.split(":", 4);
-                            if (parts.length == 4) {
-                                String username = parts[1];
-                                String deviceName = parts[2];
-                                String deviceAddress = parts[3];
-
-                                Log.d(TAG, "Saving user info to DB: " + username + " | " + deviceName + " | " + deviceAddress);
-
-                                DatabaseHelper db = new DatabaseHelper(appContext);
-                                db.associateUsernameWithDevice(username, deviceName, deviceAddress);
-                            }
-
-                        } else if (received.equals("REQUEST_USER_INFO")) {
-                            Log.d(TAG, "Received REQUEST_USER_INFO, sending USER_INFO...");
-                            sendUserInfo(); // renvoyer automatiquement
-
-                        } else {
-                            if (chatFragment != null) {
-                                chatFragment.onMessageReceived(received);
-                            } else {
-                                pendingMessages.add(received);
-                            }
+                        // Vérifiez si c'est un message de contrôle indiquant l'état de l'autre appareil
+                        if (received.equals("DEVICE_ENTERING_CHAT")) {
+                            setOtherDeviceInChat(true);
+                            continue; // Passez au prochain message
+                        } else if (received.equals("DEVICE_LEAVING_CHAT")) {
+                            setOtherDeviceInChat(false);
+                            continue; // Passez au prochain message
                         }
+                        
+                        // Vérifiez si c'est un message différé et ajoutez un indicateur
+                        final String messageToDeliver;
+                        final boolean isDelayed;
+                        
+                        if (received.startsWith("DELAYED_MESSAGE:")) {
+                            messageToDeliver = received.substring("DELAYED_MESSAGE:".length());
+                            isDelayed = true;
+                        } else {
+                            messageToDeliver = received;
+                            isDelayed = false;
+                        }
+                        
+                        // Livrez le message au fragment ou stockez-le
+                        mainHandler.post(() -> {
+                            if (chatFragment != null) {
+                                try {
+                                    chatFragment.onMessageReceived(messageToDeliver, isDelayed);
+                                } catch (Exception e) {
+                                    Log.e(TAG, "Error notifying ChatFragment: " + e.getMessage(), e);
+                                    // Si une erreur se produit, stocker le message pour une livraison ultérieure
+                                    pendingMessages.add(isDelayed ? "DELAYED:" + messageToDeliver : messageToDeliver);
+                                }
+                            } else {
+                                Log.w(TAG, "ChatFragment is null, storing message for later delivery");
+                                pendingMessages.add(isDelayed ? "DELAYED:" + messageToDeliver : messageToDeliver);
+                            }
+                        });
+                    } else if (bytes < 0) {
+                        // -1 indique la fin du flux (connexion fermée)
+                        Log.d(TAG, "End of stream reached, connection closed");
+                        break;
                     }
-
                 } catch (IOException e) {
-                    Log.e(TAG, "Error reading from input stream", e);
+                    if (!isInterrupted()) {
+                        Log.e(TAG, "Error reading from socket: " + e.getMessage(), e);
+                    }
                     break;
                 }
             }
 
-            Log.d(TAG, "ReadWriteThread exiting loop");
-        }
-
-
-
-
-        private void handleUserInfo(String userInfoJson) {
-            try {
-                // Parser le JSON
-                JSONObject json = new JSONObject(userInfoJson);
-                String username = json.getString("username");
-                String deviceName = json.getString("deviceName");
-                String deviceAddress = json.getString("deviceAddress");
-
-                // Sauvegarder les informations dans la base de données
-                DatabaseHelper dbHelper = new DatabaseHelper(appContext);
-                dbHelper.associateUsernameWithDevice(username, deviceName, deviceAddress);
-
-                Log.d(TAG, "User info saved: username=" + username + ", deviceName=" + deviceName + ", deviceAddress=" + deviceAddress);
-            } catch (Exception e) {
-                Log.e(TAG, "Error handling user info: " + e.getMessage(), e);
-            }
+            // Si on sort de la boucle, c'est que la connexion est perdue
+            Log.d(TAG, "ReadWriteThread exiting, connection lost or closed");
+            setConnected(false);
         }
 
         public void write(byte[] bytes) {
             try {
                 if (socket != null && socket.isConnected() && !socket.isClosed() && outputStream != null) {
                     outputStream.write(bytes);
-                    outputStream.flush();
+                    outputStream.flush(); // Assurez-vous que les données sont envoyées immédiatement
                     Log.d(TAG, "Message written to socket: " + bytes.length + " bytes");
                 } else {
                     Log.e(TAG, "Cannot write to socket: socket is null, closed or disconnected");
@@ -432,5 +429,49 @@ public class ChatSocketHandler {
 
     public void setAppContext(Context context) {
         this.appContext = context.getApplicationContext();
+    }
+
+    public void disconnect() {
+        Log.d(TAG, "Disconnecting all connections");
+        setConnected(false);
+        
+        try {
+            if (readWriteThread != null) {
+                readWriteThread.interrupt();
+                readWriteThread = null;
+            }
+            
+            if (socket != null && !socket.isClosed()) {
+                socket.close();
+                socket = null;
+            }
+            
+            if (serverSocket != null && !serverSocket.isClosed()) {
+                serverSocket.close();
+                serverSocket = null;
+            }
+            
+            // Vider les listes de messages
+            pendingMessages.clear();
+            undeliveredMessages.clear();
+            pendingSystemMessages.clear();
+            
+            Log.d(TAG, "All connections closed successfully");
+        } catch (IOException e) {
+            Log.e(TAG, "Error during disconnection", e);
+        }
+    }
+
+    public void setPendingMessages(ArrayList<ChatMessage> messages) {
+        this.pendingChatMessages = messages;
+        Log.d(TAG, "Set " + messages.size() + " pending chat messages");
+    }
+
+    public ArrayList<ChatMessage> getPendingMessages() {
+        return new ArrayList<>(pendingChatMessages);
+    }
+
+    public void clearPendingMessages() {
+        pendingChatMessages.clear();
     }
 }

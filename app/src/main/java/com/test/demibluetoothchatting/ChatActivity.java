@@ -109,19 +109,17 @@ public class ChatActivity extends AppCompatActivity {
     // ViewHolder for displaying individual messages
     public static class ConversationViewHolder extends RecyclerView.ViewHolder {
         private final TextView textViewMessage;
-        private final TextView textViewSender;
+
         private final TextView textViewTimestamp;
 
         public ConversationViewHolder(@NonNull View itemView) {
             super(itemView);
             textViewMessage = itemView.findViewById(R.id.textViewMessage);
-            textViewSender = itemView.findViewById(R.id.textViewSender);
             textViewTimestamp = itemView.findViewById(R.id.textViewTimestamp);
         }
 
         public void bind(Conversation conversation) {
             textViewMessage.setText(conversation.getMessage());
-            textViewSender.setText("From: " + conversation.getSender());
             textViewTimestamp.setText(conversation.getTimestamp());
         }
     }

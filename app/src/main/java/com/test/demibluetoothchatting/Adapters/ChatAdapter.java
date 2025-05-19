@@ -5,6 +5,7 @@ import android.content.Context;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
@@ -37,42 +38,34 @@ public class ChatAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
     @Override
     public int getItemViewType(int position) {
         ChatMessage message = chatMessages.get(position);
-        // If the message is sent by the current user, return VIEW_TYPE_SENDER
-        if (message.getSender().equals(currentUser)) {
-            return VIEW_TYPE_SENDER;
-        } else {
-            // Otherwise, return VIEW_TYPE_RECEIVER
-            return VIEW_TYPE_RECEIVER;
-        }
+        return message.getSender().equals(currentUser) ? VIEW_TYPE_SENDER : VIEW_TYPE_RECEIVER;
     }
 
     // Creates the appropriate ViewHolder (SenderViewHolder or ReceiverViewHolder) based on the viewType
+    @NonNull
     @Override
-    public RecyclerView.ViewHolder onCreateViewHolder(ViewGroup parent, int viewType) {
-        if (viewType == VIEW_TYPE_SENDER) {
-            // If viewType is VIEW_TYPE_SENDER, inflate the sender layout
-            View view = LayoutInflater.from(parent.getContext())
-                    .inflate(R.layout.item_message_sender, parent, false);
-            return new SenderViewHolder(view);
-        } else {
-            // If viewType is VIEW_TYPE_RECEIVER, inflate the receiver layout
-            View view = LayoutInflater.from(parent.getContext())
-                    .inflate(R.layout.item_message_receiver, parent, false);
-            return new ReceiverViewHolder(view);
-        }
+    public RecyclerView.ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
+        View view = LayoutInflater.from(parent.getContext())
+                .inflate(R.layout.item_message, parent, false);
+        return new MessageViewHolder(view);
     }
 
     // Binds data to the appropriate ViewHolder (sender or receiver) based on the position in the chatMessages list
     @Override
-    public void onBindViewHolder(RecyclerView.ViewHolder holder, int position) {
-        // Get the message at the current position
+    public void onBindViewHolder(@NonNull RecyclerView.ViewHolder holder, int position) {
         ChatMessage message = chatMessages.get(position);
-        if (holder instanceof SenderViewHolder) {
-            // If holder is of type SenderViewHolder, bind the sender message
-            ((SenderViewHolder) holder).bind(message);
+        if (getItemViewType(position) == VIEW_TYPE_SENDER) {
+            MessageViewHolder viewHolder = (MessageViewHolder) holder;
+            viewHolder.messageSentLayout.setVisibility(View.VISIBLE);
+            viewHolder.messageReceivedLayout.setVisibility(View.GONE);
+            viewHolder.textViewMessage.setText(message.getMessage());
+            viewHolder.textViewTimestamp.setText(message.getTimestamp());
         } else {
-            // If holder is of type ReceiverViewHolder, bind the receiver message
-            ((ReceiverViewHolder) holder).bind(message);
+            MessageViewHolder viewHolder = (MessageViewHolder) holder;
+            viewHolder.messageSentLayout.setVisibility(View.GONE);
+            viewHolder.messageReceivedLayout.setVisibility(View.VISIBLE);
+            viewHolder.textViewReceivedMessage.setText(message.getMessage());
+            viewHolder.textViewReceivedTimestamp.setText(message.getTimestamp());
         }
     }
 
@@ -83,34 +76,17 @@ public class ChatAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
     }
 
     // ViewHolder for the sender's messages
-    class SenderViewHolder extends RecyclerView.ViewHolder {
-        TextView messageBody; // TextView to display the message body
-
-        // Constructor to initialize the messageBody TextView from the sender layout
-        SenderViewHolder(View itemView) {
+    public static class MessageViewHolder extends RecyclerView.ViewHolder {
+        LinearLayout messageSentLayout, messageReceivedLayout;
+        TextView textViewMessage, textViewTimestamp, textViewReceivedMessage, textViewReceivedTimestamp;
+        public MessageViewHolder(@NonNull View itemView) {
             super(itemView);
-            messageBody = itemView.findViewById(R.id.message_body);
-        }
-
-        // Binds the message data (message text) to the TextView
-        void bind(ChatMessage message) {
-            messageBody.setText(message.getMessage());
-        }
-    }
-
-    // ViewHolder for the receiver's messages
-    class ReceiverViewHolder extends RecyclerView.ViewHolder {
-        TextView messageBody; // TextView to display the message body
-
-        // Constructor to initialize the messageBody TextView from the receiver layout
-        ReceiverViewHolder(View itemView) {
-            super(itemView);
-            messageBody = itemView.findViewById(R.id.message_body);
-        }
-
-        // Binds the message data (message text) to the TextView
-        void bind(ChatMessage message) {
-            messageBody.setText(message.getMessage());
+            messageSentLayout = itemView.findViewById(R.id.message_sent_layout);
+            messageReceivedLayout = itemView.findViewById(R.id.message_received_layout);
+            textViewMessage = itemView.findViewById(R.id.textViewMessage);
+            textViewTimestamp = itemView.findViewById(R.id.textViewTimestamp);
+            textViewReceivedMessage = itemView.findViewById(R.id.textViewReceivedMessage);
+            textViewReceivedTimestamp = itemView.findViewById(R.id.textViewReceivedTimestamp);
         }
     }
 }

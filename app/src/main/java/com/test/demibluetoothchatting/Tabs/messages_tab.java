@@ -74,7 +74,6 @@ public class messages_tab extends Fragment implements WiFiDirectBroadcastReceive
     private WifiP2pManager.PeerListListener peerListListener;
     private IntentFilter intentFilter;
     private WiFiDirectBroadcastReceiver wifiDirectReceiver;
-    private DatabaseHelper dbHelper;
 
     private ArrayAdapter<String> availableDevicesAdapter;
     private ArrayAdapter<String> connectedDevicesAdapter;
@@ -97,8 +96,6 @@ public class messages_tab extends Fragment implements WiFiDirectBroadcastReceive
                              @Nullable Bundle savedInstanceState) {
         View main_view = inflater.inflate(R.layout.messages_tab, container, false);
 
-        // Initialiser dbHelper
-        dbHelper = new DatabaseHelper(requireActivity());
 
         // Vérifier si nous sommes un utilisateur "field"
         SharedPreferences prefs = getActivity().getSharedPreferences("UserPrefs", Context.MODE_PRIVATE);
@@ -149,20 +146,15 @@ public class messages_tab extends Fragment implements WiFiDirectBroadcastReceive
             String deviceInfo = connectedDevicesAdapter.getItem(position);
             if (deviceInfo != null) {
                 Log.d("MessagesTab", "Selected connected device: " + deviceInfo);
+                // Extract device info from the item string
                 String[] parts = deviceInfo.split("\n");
                 if (parts.length > 1) {
-                    String deviceAddress = parts[1].trim();
-                    String deviceName = parts[0].trim();
-
-                    // Obtenir le username via l'adresse MAC
-                    String username = dbHelper.getUsernameForDevice(deviceAddress);
-                    String displayName = (username != null) ? username : deviceName;
-
-                    openChatFragment(displayName, deviceAddress);
+                    String deviceName = parts[0];
+                    String deviceAddress = parts[1];
+                    openChatFragment(deviceName, deviceAddress);
                 }
             }
         });
-
 
         // Set up discover button
         Button discoverButton = main_view.findViewById(R.id.discover_button);
@@ -385,7 +377,8 @@ public class messages_tab extends Fragment implements WiFiDirectBroadcastReceive
     }
 
     private void connectToDevice(String deviceAddress) {
-        Log.d("MessagesTab", "[AUTO-CONNECT] Attempting to connect to device: " + deviceAddress);
+        Log.d("MessagesTab", "Attempting to connect to device: " + deviceAddress);
+
         WifiP2pConfig config = new WifiP2pConfig();
         config.deviceAddress = deviceAddress;
         try {
@@ -394,21 +387,20 @@ public class messages_tab extends Fragment implements WiFiDirectBroadcastReceive
                 manager.connect(channel, config, new WifiP2pManager.ActionListener() {
                     @Override
                     public void onSuccess() {
-                        Log.d("MessagesTab", "[AUTO-CONNECT] Connection initiated successfully");
+                        Log.d("MessagesTab", "Connection initiated successfully");
                         Toast.makeText(getContext(), "Connecting to device...", Toast.LENGTH_SHORT).show();
                     }
                     @Override
                     public void onFailure(int reason) {
-                        String errorMsg = getErrorMessage(reason);
-                        Log.e("MessagesTab", "[AUTO-CONNECT] Connection failed: " + errorMsg);
-                        Toast.makeText(getContext(), "Failed to connect: " + errorMsg, Toast.LENGTH_LONG).show();
+                        Log.e("MessagesTab", "Connection failed: " + getDetailedErrorMessage(reason));
+                        Toast.makeText(getContext(),
+                                "Failed to connect: " + getDetailedErrorMessage(reason),
+                                Toast.LENGTH_LONG).show();
                     }
                 });
-            } else {
-                Log.e("MessagesTab", "[AUTO-CONNECT] Permission ACCESS_FINE_LOCATION not granted");
             }
         } catch (SecurityException e) {
-            Log.e("MessagesTab", "[AUTO-CONNECT] Security exception during connection: " + e.getMessage());
+            Log.e("MessagesTab", "Security exception during connection: " + e.getMessage());
             Toast.makeText(getContext(), "Permission denied for connection", Toast.LENGTH_SHORT).show();
         }
     }
@@ -532,7 +524,7 @@ public class messages_tab extends Fragment implements WiFiDirectBroadcastReceive
             } else {
                 noAvailableDevicesText.setVisibility(View.GONE);
 
-                // Liste pour stocker les appareils disponibles
+                // Liste pour stocker les appareils disponibles (non connectés et non invités)
                 List<WifiP2pDevice> availableDevices = new ArrayList<>();
 
                 for (WifiP2pDevice device : peers) {
@@ -545,17 +537,13 @@ public class messages_tab extends Fragment implements WiFiDirectBroadcastReceive
                     }
 
                     if (!alreadyConnected) {
-                        // Récupérer le username associé au device
-                        String username = dbHelper.getUsernameForDevice(device.deviceAddress);
-                        String displayName = (username != null) ? username : device.deviceName;
-                        String deviceInfo = displayName + "\n" + device.deviceAddress;
+                        String deviceInfo = device.deviceName + "\n" + device.deviceAddress;
                         Log.d("WiFiDirect", "Found device: " + deviceInfo);
-                        Log.d("MessagesTab", "Device detected: " + device.deviceName + " | " + device.deviceAddress);
-                        Log.d("DISPLAY_USERNAME", "deviceName=" + device.deviceName + " | deviceAddress=" + device.deviceAddress + " | username=" + username);
-
                         availableDevicesAdapter.add(deviceInfo);
                         logDeviceStatus(device);
 
+                        // N'ajouter à la liste des appareils disponibles que ceux qui sont vraiment disponibles
+                        // (pas déjà invités ou en cours de connexion)
                         if (device.status == WifiP2pDevice.AVAILABLE) {
                             availableDevices.add(device);
                         }
@@ -564,10 +552,10 @@ public class messages_tab extends Fragment implements WiFiDirectBroadcastReceive
                     }
                 }
 
-                // Rétablir la connexion automatique au premier appareil disponible
+                // Se connecter automatiquement au premier appareil trouvé qui est DISPONIBLE
                 if (!availableDevices.isEmpty()) {
                     WifiP2pDevice firstDevice = availableDevices.get(0);
-                    Log.d("MessagesTab", "[AUTO-CONNECT] Attempting automatic connection to: " + firstDevice.deviceName + " (" + firstDevice.deviceAddress + ")");
+                    Log.d("MessagesTab", "Attempting automatic connection to: " + firstDevice.deviceName);
                     connectToDevice(firstDevice.deviceAddress);
                 } else {
                     Log.d("MessagesTab", "No available devices found for connection (all are busy or already invited)");
@@ -629,9 +617,7 @@ public class messages_tab extends Fragment implements WiFiDirectBroadcastReceive
                 } else {
                     Log.d("MessagesTab", "Device is client, starting client socket to " + info.groupOwnerAddress);
                     ChatSocketHandler.getInstance().setGroupOwnerAddress(info.groupOwnerAddress);
-                    new Handler(Looper.getMainLooper()).postDelayed(() -> {
-                        ChatSocketHandler.getInstance().startClientSocket(info.groupOwnerAddress);
-                    }, 1000);
+                    ChatSocketHandler.getInstance().startClientSocket(info.groupOwnerAddress);
                 }
 
                 // Ajouter un délai pour s'assurer que les sockets sont bien établis
@@ -673,10 +659,10 @@ public class messages_tab extends Fragment implements WiFiDirectBroadcastReceive
         }
         if (!deviceExists) {
             connectedPeers.add(device);
+            // Ajout dans la liste statique
             if (!connectedDeviceAddresses.contains(device.deviceAddress)) {
                 connectedDeviceAddresses.add(device.deviceAddress);
             }
-            
             // Retirer cet appareil de la liste des Available Devices
             for (int i = 0; i < availableDevicesAdapter.getCount(); i++) {
                 String item = availableDevicesAdapter.getItem(i);
@@ -686,14 +672,10 @@ public class messages_tab extends Fragment implements WiFiDirectBroadcastReceive
                 }
             }
             availableDevicesAdapter.notifyDataSetChanged();
-            
             requireActivity().runOnUiThread(() -> {
                 connectedDevicesAdapter.clear();
                 for (WifiP2pDevice connectedDevice : connectedPeers) {
-                    // Récupérer le username associé au device
-                    String username = dbHelper.getUsernameForDevice(connectedDevice.deviceAddress);
-                    String displayName = (username != null) ? username : connectedDevice.deviceName;
-                    String deviceInfo = displayName + "\n" + connectedDevice.deviceAddress;
+                    String deviceInfo = connectedDevice.deviceName + "\n" + connectedDevice.deviceAddress;
                     connectedDevicesAdapter.add(deviceInfo);
                 }
                 connectedDevicesAdapter.notifyDataSetChanged();
@@ -719,11 +701,7 @@ public class messages_tab extends Fragment implements WiFiDirectBroadcastReceive
                     connectedDevicesAdapter.add("No connected devices");
                 } else {
                     for (WifiP2pDevice device : connectedPeers) {
-                        // Récupérer le username associé au device
-                        String username = dbHelper.getUsernameForDevice(device.deviceAddress);
-                        String displayName = (username != null) ? username : device.deviceName;
-                        String deviceInfo = displayName + "\n" + device.deviceAddress;
-                        connectedDevicesAdapter.add(deviceInfo);
+                        connectedDevicesAdapter.add(device.deviceName + "\n" + device.deviceAddress);
                     }
                 }
                 connectedDevicesAdapter.notifyDataSetChanged();
@@ -753,13 +731,8 @@ public class messages_tab extends Fragment implements WiFiDirectBroadcastReceive
     @Override
     public void updateLocalDevice(WifiP2pDevice device) {
         localDevice = device;
-        Log.d("MessagesTab", "updateLocalDevice: Local device updated: " + device.deviceName + " (" + device.deviceAddress + ")");
-
-        // PATCH: Stocker la bonne adresse MAC P2P dans les prefs
-        SharedPreferences prefs = requireActivity().getSharedPreferences("UserPrefs", Context.MODE_PRIVATE);
-        SharedPreferences.Editor editor = prefs.edit();
-        editor.putString("deviceAddress", device.deviceAddress);
-        editor.apply();
+        Log.d("MessagesTab", "updateLocalDevice: Local device updated: " + device.deviceName
+                + " (" + device.deviceAddress + ")");
     }
 
     @Override
@@ -792,10 +765,7 @@ public class messages_tab extends Fragment implements WiFiDirectBroadcastReceive
             // Mettre à jour la liste des Connected Devices
             connectedDevicesAdapter.clear();
             for (WifiP2pDevice d : connectedPeers) {
-                // Utiliser le username si disponible
-                String username = dbHelper.getUsernameForDevice(d.deviceAddress);
-                String displayName = (username != null) ? username : d.deviceName;
-                connectedDevicesAdapter.add(displayName + "\n" + d.deviceAddress);
+                connectedDevicesAdapter.add(d.deviceName + "\n" + d.deviceAddress);
             }
             connectedDevicesAdapter.notifyDataSetChanged();
 
@@ -933,7 +903,6 @@ public class messages_tab extends Fragment implements WiFiDirectBroadcastReceive
                 syncWork
         );
     }
-
 
 }
 
