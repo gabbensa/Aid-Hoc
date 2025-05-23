@@ -518,13 +518,14 @@ public class messages_tab extends Fragment implements WiFiDirectBroadcastReceive
         requireActivity().runOnUiThread(() -> {
             availableDevicesAdapter.clear();
             TextView noAvailableDevicesText = requireView().findViewById(R.id.noAvailableDevicesText);
+            
             if (peers.isEmpty()) {
                 Log.d("WiFiDirect", "No devices found");
                 noAvailableDevicesText.setVisibility(View.VISIBLE);
             } else {
                 noAvailableDevicesText.setVisibility(View.GONE);
 
-                // Liste pour stocker les appareils disponibles (non connectés et non invités)
+                // List to store available devices (not connected and not invited)
                 List<WifiP2pDevice> availableDevices = new ArrayList<>();
 
                 for (WifiP2pDevice device : peers) {
@@ -542,8 +543,7 @@ public class messages_tab extends Fragment implements WiFiDirectBroadcastReceive
                         availableDevicesAdapter.add(deviceInfo);
                         logDeviceStatus(device);
 
-                        // N'ajouter à la liste des appareils disponibles que ceux qui sont vraiment disponibles
-                        // (pas déjà invités ou en cours de connexion)
+                        // Only add to available devices list if they are truly available
                         if (device.status == WifiP2pDevice.AVAILABLE) {
                             availableDevices.add(device);
                         }
@@ -552,7 +552,7 @@ public class messages_tab extends Fragment implements WiFiDirectBroadcastReceive
                     }
                 }
 
-                // Se connecter automatiquement au premier appareil trouvé qui est DISPONIBLE
+                // Automatically connect to the first available device
                 if (!availableDevices.isEmpty()) {
                     WifiP2pDevice firstDevice = availableDevices.get(0);
                     Log.d("MessagesTab", "Attempting automatic connection to: " + firstDevice.deviceName);

@@ -61,13 +61,6 @@ public class ChatSocketHandler {
         if (fragment != null && !pendingMessages.isEmpty()) {
             Log.d(TAG, "Delivering " + pendingMessages.size() + " pending messages to new fragment");
 
-            // Show a notification Toast
-            int messageCount = pendingMessages.size();
-            new Handler(Looper.getMainLooper()).post(() -> {
-                Toast.makeText(fragment.getContext(),
-                    messageCount + " New messages received",
-                    Toast.LENGTH_LONG).show();
-            });
 
             // Create a copy of pending messages to avoid concurrent modification
             List<String> messagesToDeliver = new ArrayList<>(pendingMessages);
