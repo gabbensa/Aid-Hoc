@@ -7,7 +7,7 @@ import android.widget.Toast;
 import android.content.Context;
 import android.content.SharedPreferences;
 
-import com.test.demibluetoothchatting.Database.DatabaseHelper;
+
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -19,7 +19,7 @@ import java.net.Socket;
 import java.util.ArrayList;
 import java.util.List;
 
-import org.json.JSONObject;
+
 
 public class ChatSocketHandler {
     private static ChatSocketHandler instance;
@@ -57,11 +57,11 @@ public class ChatSocketHandler {
     public void setChatFragment(ChatFragment fragment) {
         this.chatFragment = fragment;
 
-        // Si un nouveau fragment est défini et que nous avons des messages en attente, les livrer
+        // If a new fragment is set and we have pending messages, deliver them
         if (fragment != null && !pendingMessages.isEmpty()) {
             Log.d(TAG, "Delivering " + pendingMessages.size() + " pending messages to new fragment");
 
-            // Afficher une notification Toast
+            // Show a notification Toast
             int messageCount = pendingMessages.size();
             new Handler(Looper.getMainLooper()).post(() -> {
                 Toast.makeText(fragment.getContext(),
@@ -69,10 +69,19 @@ public class ChatSocketHandler {
                     Toast.LENGTH_LONG).show();
             });
 
-            for (String message : pendingMessages) {
-                fragment.onMessageReceived(message);
-            }
+            // Create a copy of pending messages to avoid concurrent modification
+            List<String> messagesToDeliver = new ArrayList<>(pendingMessages);
             pendingMessages.clear();
+
+            // Deliver each message with a small delay to ensure proper order
+            for (int i = 0; i < messagesToDeliver.size(); i++) {
+                final String message = messagesToDeliver.get(i);
+                new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                    if (fragment != null) {
+                        fragment.onMessageReceived(message, true); // Mark as delayed message
+                    }
+                }, i * 100); // 100ms delay between messages
+            }
         }
     }
 
@@ -140,17 +149,8 @@ public class ChatSocketHandler {
         }).start();
     }
 
-    // Nouvelle méthode pour envoyer un message système (ex: REQUEST_USER_INFO)
-    public void sendSystemMessage(String message) {
-        if (readWriteThread != null && isConnected()) {
-            sendMessage(message);
-        } else {
-            Log.d(TAG, "Socket not ready, queuing system message: " + message);
-            pendingSystemMessages.add(message);
-        }
-    }
 
-    // Vider la file d'attente des messages système dès que la socket est prête
+
     private void flushPendingSystemMessages() {
         if (readWriteThread != null && isConnected() && !pendingSystemMessages.isEmpty()) {
             Log.d(TAG, "Flushing " + pendingSystemMessages.size() + " pending system messages");
@@ -197,16 +197,7 @@ public class ChatSocketHandler {
         }
     }
 
-    private void sendTestMessage() {
-        new Thread(() -> {
-            try {
-                Log.d(TAG, "Sending test message");
-                sendMessage("TEST_CONNECTION");
-            } catch (Exception e) {
-                Log.e(TAG, "Error sending test message", e);
-            }
-        }).start();
-    }
+
 
     // Modifié pour ne pas fermer les connexions existantes
     private void closeExistingConnections() {

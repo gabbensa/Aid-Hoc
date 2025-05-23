@@ -85,22 +85,19 @@ public class ChatFragment extends Fragment {
         controller = new Controller(handler);
         ChatSocketHandler.getInstance().setChatFragment(this);
 
-
         Bundle args = getArguments();
         if (args != null) {
             deviceName = args.getString("device_name");
             deviceAddress = args.getString("device_address");
             txtDeviceName.setText(deviceName);
+            
+            // Always create a new WifiP2pDevice when returning to chat
+            connectingDevice = new WifiP2pDevice();
+            connectingDevice.deviceName = deviceName;
+            connectingDevice.deviceAddress = deviceAddress;
+            
             loadMessagesFromDatabase(deviceName);
-
-            if (connectingDevice == null && deviceName != null && deviceAddress != null) {
-                connectingDevice = new WifiP2pDevice();
-                connectingDevice.deviceName = deviceName;
-                connectingDevice.deviceAddress = deviceAddress;
-            }
         }
-
-
 
         rootView.findViewById(R.id.btn_send).setOnClickListener(v -> {
             if (inputLayout.getText().toString().isEmpty()) {
@@ -111,14 +108,12 @@ public class ChatFragment extends Fragment {
             }
         });
 
-        // Dans ChatFragment, par exemple dans onCreateView ou onResume
+        // In ChatFragment, for example in onCreateView or onResume
         if (!ChatSocketHandler.getInstance().isConnected()) {
             manager.requestConnectionInfo(channel, info -> {
                 if (info.groupFormed) {
                     if (info.isGroupOwner) {
-
                         ChatSocketHandler.getInstance().startServerSocket();
-
                     } else {
                         ChatSocketHandler.getInstance().startClientSocket(info.groupOwnerAddress);
                         setStatus("Joining chat...");
@@ -132,12 +127,8 @@ public class ChatFragment extends Fragment {
             setStatus("Connected");
         }
 
-
-
         return rootView;
     }
-
-
 
     @SuppressLint("MissingPermission")
     private void connectToSelectedDevice(String deviceAddress) {
@@ -201,7 +192,6 @@ public class ChatFragment extends Fragment {
         boolean sent = ChatSocketHandler.getInstance().sendMessage(message);
 
         if (sent) {
-
             // Enregistrer le message dans la base de données
             if (connectingDevice != null) {
                 // Obtenir le nom d'utilisateur actuel au lieu d'utiliser "This Device"
@@ -218,7 +208,6 @@ public class ChatFragment extends Fragment {
         }
     }
 
-    // Ajouter cette méthode pour obtenir le nom d'utilisateur
     private String getUserName() {
         // Essayer d'obtenir le nom d'utilisateur des préférences partagées
         SharedPreferences prefs = requireActivity().getSharedPreferences("UserPrefs", Context.MODE_PRIVATE);
@@ -234,9 +223,7 @@ public class ChatFragment extends Fragment {
         return userName;
     }
 
-    // Ajouter cette nouvelle méthode pour déclencher la synchronisation immédiate
     private void triggerImmediateSync() {
-
         // Créer une contrainte pour s'assurer que l'appareil est connecté à Internet
         androidx.work.Constraints constraints = new androidx.work.Constraints.Builder()
                 .setRequiredNetworkType(androidx.work.NetworkType.CONNECTED)
@@ -316,17 +303,27 @@ public class ChatFragment extends Fragment {
     public void onMessageReceived(String message, boolean isDelayed) {
         requireActivity().runOnUiThread(() -> {
             if (connectingDevice != null) {
-                // Ajoutez un préfixe ou une indication visuelle pour les messages différés
+                // Add visual indication for delayed messages
                 String displayMessage = message;
                 if (isDelayed) {
-                    displayMessage =  message;
+                    displayMessage = "📬 " + message; // Add an envelope emoji for delayed messages
                 }
 
-                // Obtenir le nom d'utilisateur actuel
+                // Get current username
                 String currentUserName = getUserName();
 
-                dbHelper.insertMessage(connectingDevice.deviceName, currentUserName, displayMessage, getCurrentTimestamp(), 0);
+                // Insert message with timestamp
+                String timestamp = getCurrentTimestamp();
+                dbHelper.insertMessage(connectingDevice.deviceName, currentUserName, displayMessage, timestamp, isDelayed ? 1 : 0);
+                
+                // Reload messages and scroll to bottom
                 loadMessagesFromDatabase(connectingDevice.deviceName);
+                recyclerView.scrollToPosition(chatMessages.size() - 1);
+                
+                // Show toast for delayed messages
+                if (isDelayed) {
+                    Toast.makeText(getActivity(), "Received delayed message", Toast.LENGTH_SHORT).show();
+                }
             } else {
                 Log.w("ChatFragment", "No connected device, cannot save message.");
             }
@@ -349,15 +346,11 @@ public class ChatFragment extends Fragment {
     @Override
     public void onResume() {
         super.onResume();
-
-
     }
 
     @Override
     public void onPause() {
         super.onPause();
-
-
     }
 
     @Override
@@ -381,28 +374,8 @@ public class ChatFragment extends Fragment {
             }, 5000); // Attendre 5 secondes avant de réessayer
         }
     }
-
-    public void onNewPendingMessages(int count) {
-        Toast.makeText(getActivity(), "You have " + count + " new messages", Toast.LENGTH_SHORT).show();
-    }
-
-    public void setNewMessages(List<String> messages) {
-        this.newMessages = new ArrayList<>(messages);
-
-        // Programmer l'effacement de la surbrillance après 5 secondes
-        highlightHandler.removeCallbacksAndMessages(null);
-        highlightHandler.postDelayed(() -> {
-            newMessages.clear();
-            if (chatAdapter != null) {
-                chatAdapter.notifyDataSetChanged();
-            }
-        }, 5000); // 5 secondes
-    }
-
-    // Méthode pour vérifier si un message est nouveau
-    public boolean isNewMessage(String message) {
-        return newMessages.contains(message);
-    }
 }
+
+
 
 
