@@ -191,7 +191,7 @@ public class ChatSocketHandler {
         try {
             String userInfo = String.format("USER_INFO:%s:%s:%s", username, deviceName, deviceAddress);
             Log.d(TAG, "Sending user info: " + userInfo);
-            sendMessage(userInfo);
+
         } catch (Exception e) {
             Log.e(TAG, "Error sending user info: " + e.getMessage(), e);
         }

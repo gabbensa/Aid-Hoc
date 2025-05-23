@@ -601,14 +601,13 @@ public class messages_tab extends Fragment implements WiFiDirectBroadcastReceive
 
     // Update the connectionInfoListener to add connected devices to the list
     private final ConnectionInfoListener connectionInfoListener = new ConnectionInfoListener() {
-
         @Override
         public void onConnectionInfoAvailable(WifiP2pInfo info) {
             Log.d("MessagesTab", "Connection info available");
 
             if (info.groupFormed) {
                 Log.d("MessagesTab", "Group formed");
-                Toast.makeText(getContext(), "Connected! Ready to chat.", Toast.LENGTH_SHORT).show();
+                Toast.makeText(getContext(), "Connected! Establishing chat connection...", Toast.LENGTH_SHORT).show();
 
                 if (info.isGroupOwner) {
                     Log.d("MessagesTab", "Device is group owner, starting server socket");
@@ -620,31 +619,53 @@ public class messages_tab extends Fragment implements WiFiDirectBroadcastReceive
                     ChatSocketHandler.getInstance().startClientSocket(info.groupOwnerAddress);
                 }
 
-                // Ajouter un délai pour s'assurer que les sockets sont bien établis
+                // Increase delay to ensure socket connection is established
                 new Handler().postDelayed(() -> {
                     Log.d("MessagesTab", "Checking socket connection status");
                     if (ChatSocketHandler.getInstance().isSocketConnected()) {
                         Log.d("MessagesTab", "Socket connection is established");
 
-                        // Ouvrir automatiquement le chat avec l'appareil connecté
+                        // Find and open chat with connected device
                         if (!peers.isEmpty()) {
-                            // Trouver l'appareil connecté
                             for (WifiP2pDevice device : peers) {
                                 if (device.status == WifiP2pDevice.CONNECTED) {
                                     Log.d("MessagesTab", "Auto-opening chat with: " + device.deviceName);
-                                    openChatFragment(device.deviceName, device.deviceAddress);
+                                    // Add a small delay before opening chat
+                                    new Handler().postDelayed(() -> {
+                                        openChatFragment(device.deviceName, device.deviceAddress);
+                                    }, 500);
                                     break;
                                 }
                             }
                         }
                     } else {
-                        Log.d("MessagesTab", "Socket connection failed to establish");
-                        Toast.makeText(getContext(), "Socket connection failed. Try reconnecting.", Toast.LENGTH_LONG).show();
+                        Log.d("MessagesTab", "Socket connection failed to establish, retrying...");
+                        // Retry socket connection
+                        if (info.isGroupOwner) {
+                            ChatSocketHandler.getInstance().startServerSocket();
+                        } else {
+                            ChatSocketHandler.getInstance().startClientSocket(info.groupOwnerAddress);
+                        }
+                        
+                        // Check again after retry
+                        new Handler().postDelayed(() -> {
+                            if (ChatSocketHandler.getInstance().isSocketConnected()) {
+                                if (!peers.isEmpty()) {
+                                    for (WifiP2pDevice device : peers) {
+                                        if (device.status == WifiP2pDevice.CONNECTED) {
+                                            openChatFragment(device.deviceName, device.deviceAddress);
+                                            break;
+                                        }
+                                    }
+                                }
+                            } else {
+                                Toast.makeText(getContext(), "Connection failed. Please try again.", Toast.LENGTH_LONG).show();
+                            }
+                        }, 2000);
                     }
-                }, 2000); // 2 secondes de délai
+                }, 3000); // Increased delay to 3 seconds
             }
         }
-
     };
 
     // Method to update the connected devices list

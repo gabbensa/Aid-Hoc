@@ -306,7 +306,7 @@ public class ChatFragment extends Fragment {
                 // Add visual indication for delayed messages
                 String displayMessage = message;
                 if (isDelayed) {
-                    displayMessage = "📬 " + message; // Add an envelope emoji for delayed messages
+                    displayMessage =  message; // Add an envelope emoji for delayed messages
                 }
 
                 // Get current username
