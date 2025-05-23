@@ -23,6 +23,7 @@ import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.appcompat.app.AlertDialog;
 import androidx.fragment.app.Fragment;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
@@ -80,6 +81,18 @@ public class ChatFragment extends Fragment {
 
         rootView.findViewById(R.id.btn_back).setOnClickListener(v -> {
             if (getFragmentManager() != null) getFragmentManager().popBackStack();
+        });
+
+        // Add disconnect button handler
+        rootView.findViewById(R.id.btn_disconnect).setOnClickListener(v -> {
+            new AlertDialog.Builder(requireContext())
+                .setTitle("Disconnect")
+                .setMessage("Are you sure you want to disconnect from the chat?")
+                .setPositiveButton("Yes", (dialog, which) -> {
+                    disconnectFromChat();
+                })
+                .setNegativeButton("No", null)
+                .show();
         });
 
         controller = new Controller(handler);
@@ -372,6 +385,62 @@ public class ChatFragment extends Fragment {
             new Handler(Looper.getMainLooper()).postDelayed(() -> {
                 connectToSelectedDevice(connectingDevice.deviceAddress);
             }, 5000); // Attendre 5 secondes avant de réessayer
+        }
+    }
+
+    private void disconnectFromChat() {
+        // Notify the other device about disconnection
+        if (ChatSocketHandler.getInstance().isConnected()) {
+            ChatSocketHandler.getInstance().sendMessage("DISCONNECT_REQUEST");
+        }
+
+        // Clean up the socket connection
+        ChatSocketHandler.getInstance().disconnect();
+        
+        // Disconnect from WiFi Direct
+        if (manager != null && channel != null) {
+            manager.removeGroup(channel, new WifiP2pManager.ActionListener() {
+                @Override
+                public void onSuccess() {
+                    Log.d("ChatFragment", "Successfully removed from WiFi Direct group");
+                    // After removing from group, cancel the connection
+                    manager.cancelConnect(channel, new WifiP2pManager.ActionListener() {
+                        @Override
+                        public void onSuccess() {
+                            Log.d("ChatFragment", "Successfully cancelled WiFi Direct connection");
+                            requireActivity().runOnUiThread(() -> {
+                                Toast.makeText(getActivity(), "Disconnected from chat", Toast.LENGTH_SHORT).show();
+                                // Return to previous screen
+                                if (getFragmentManager() != null) {
+                                    getFragmentManager().popBackStack();
+                                }
+                            });
+                        }
+
+                        @Override
+                        public void onFailure(int reason) {
+                            Log.e("ChatFragment", "Failed to cancel WiFi Direct connection: " + reason);
+                            requireActivity().runOnUiThread(() -> {
+                                Toast.makeText(getActivity(), "Error disconnecting from WiFi Direct", Toast.LENGTH_SHORT).show();
+                            });
+                        }
+                    });
+                }
+
+                @Override
+                public void onFailure(int reason) {
+                    Log.e("ChatFragment", "Failed to remove from WiFi Direct group: " + reason);
+                    requireActivity().runOnUiThread(() -> {
+                        Toast.makeText(getActivity(), "Error removing from group", Toast.LENGTH_SHORT).show();
+                    });
+                }
+            });
+        } else {
+            // If manager or channel is null, just show the disconnection message and return
+            Toast.makeText(getActivity(), "Disconnected from chat", Toast.LENGTH_SHORT).show();
+            if (getFragmentManager() != null) {
+                getFragmentManager().popBackStack();
+            }
         }
     }
 }

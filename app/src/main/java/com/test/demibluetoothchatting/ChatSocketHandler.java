@@ -299,11 +299,12 @@ public class ChatSocketHandler {
         }
     }
 
-    public class ReadWriteThread extends Thread {
+    private class ReadWriteThread extends Thread {
         private final Socket socket;
         private final InputStream inputStream;
         private final OutputStream outputStream;
         private final Handler mainHandler;
+        private boolean isRunning = true;
 
         public ReadWriteThread(Socket socket) throws IOException {
             this.socket = socket;
@@ -319,47 +320,35 @@ public class ChatSocketHandler {
             byte[] buffer = new byte[1024];
             int bytes;
 
-            while (!isInterrupted() && socket != null && !socket.isClosed()) {
+            while (isRunning && !isInterrupted() && socket != null && !socket.isClosed()) {
                 try {
                     if (!socket.isConnected()) {
                         Log.e(TAG, "Socket disconnected");
+                        handleDisconnection("Connection lost");
                         break;
                     }
 
                     bytes = inputStream.read(buffer);
                     if (bytes > 0) {
-                        final String received = new String(buffer, 0, bytes);
-                        Log.d(TAG, "Message received: " + received);
+                        String message = new String(buffer, 0, bytes);
+                        Log.d(TAG, "Received message: " + message);
 
-                        // Vérifiez si c'est un message de contrôle indiquant l'état de l'autre appareil
-                        if (received.equals("DEVICE_ENTERING_CHAT")) {
-                            setOtherDeviceInChat(true);
-                            continue; // Passez au prochain message
-                        } else if (received.equals("DEVICE_LEAVING_CHAT")) {
-                            setOtherDeviceInChat(false);
-                            continue; // Passez au prochain message
+                        // Handle disconnection request
+                        if (message.equals("DISCONNECT_REQUEST")) {
+                            handleDisconnection("Other device disconnected");
+                            break;
                         }
-                        
-                        // Vérifiez si c'est un message différé et ajoutez un indicateur
-                        final String messageToDeliver;
-                        final boolean isDelayed;
-                        
-                        if (received.startsWith("DELAYED_MESSAGE:")) {
-                            messageToDeliver = received.substring("DELAYED_MESSAGE:".length());
-                            isDelayed = true;
-                        } else {
-                            messageToDeliver = received;
-                            isDelayed = false;
-                        }
-                        
-                        // Livrez le message au fragment ou stockez-le
+
+                        // Handle delayed message
+                        boolean isDelayed = message.startsWith("DELAYED:");
+                        String messageToDeliver = isDelayed ? message.substring(8) : message;
+
                         mainHandler.post(() -> {
                             if (chatFragment != null) {
                                 try {
                                     chatFragment.onMessageReceived(messageToDeliver, isDelayed);
                                 } catch (Exception e) {
                                     Log.e(TAG, "Error notifying ChatFragment: " + e.getMessage(), e);
-                                    // Si une erreur se produit, stocker le message pour une livraison ultérieure
                                     pendingMessages.add(isDelayed ? "DELAYED:" + messageToDeliver : messageToDeliver);
                                 }
                             } else {
@@ -368,28 +357,40 @@ public class ChatSocketHandler {
                             }
                         });
                     } else if (bytes < 0) {
-                        // -1 indique la fin du flux (connexion fermée)
                         Log.d(TAG, "End of stream reached, connection closed");
+                        handleDisconnection("Connection closed");
                         break;
                     }
                 } catch (IOException e) {
                     if (!isInterrupted()) {
                         Log.e(TAG, "Error reading from socket: " + e.getMessage(), e);
+                        handleDisconnection("Connection error: " + e.getMessage());
                     }
                     break;
                 }
             }
 
-            // Si on sort de la boucle, c'est que la connexion est perdue
-            Log.d(TAG, "ReadWriteThread exiting, connection lost or closed");
+            Log.d(TAG, "ReadWriteThread exiting");
             setConnected(false);
+        }
+
+        private void handleDisconnection(String reason) {
+            Log.d(TAG, "Handling disconnection: " + reason);
+            isRunning = false;
+            setConnected(false);
+            
+            mainHandler.post(() -> {
+                if (chatFragment != null) {
+                    Toast.makeText(chatFragment.getContext(), reason, Toast.LENGTH_LONG).show();
+                }
+            });
         }
 
         public void write(byte[] bytes) {
             try {
                 if (socket != null && socket.isConnected() && !socket.isClosed() && outputStream != null) {
                     outputStream.write(bytes);
-                    outputStream.flush(); // Assurez-vous que les données sont envoyées immédiatement
+                    outputStream.flush();
                     Log.d(TAG, "Message written to socket: " + bytes.length + " bytes");
                 } else {
                     Log.e(TAG, "Cannot write to socket: socket is null, closed or disconnected");
@@ -442,7 +443,7 @@ public class ChatSocketHandler {
                 serverSocket = null;
             }
             
-            // Vider les listes de messages
+            // Clear message lists
             pendingMessages.clear();
             undeliveredMessages.clear();
             pendingSystemMessages.clear();

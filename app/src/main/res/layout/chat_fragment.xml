@@ -52,6 +52,16 @@
                     android:textColorHint="#B3FFFFFF"
                     android:textColor="@color/white"
                     android:textSize="20sp" />
+
+                <ImageView
+                    android:id="@+id/btn_disconnect"
+                    android:layout_width="24dp"
+                    android:layout_height="24dp"
+                    android:layout_centerVertical="true"
+                    android:layout_alignParentEnd="true"
+                    android:layout_marginRight="10dp"
+                    android:tint="@color/white"
+                    android:background="@drawable/ic_baseline_call_end_24" />
             </RelativeLayout>
         </LinearLayout>
     </LinearLayout>
