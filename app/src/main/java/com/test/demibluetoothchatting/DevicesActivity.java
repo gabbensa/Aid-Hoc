@@ -101,7 +101,7 @@ public class DevicesActivity extends AppCompatActivity implements
         registerReceiver(receiver, intentFilter);
 
 
-        // Resynchroniser l’état de connexion
+        // Resynchroniser l'état de connexion
         manager.requestConnectionInfo(channel, info -> {
             if (info.groupFormed) {
                 startChat();
@@ -279,5 +279,29 @@ public class DevicesActivity extends AppCompatActivity implements
         Log.d(TAG, "Local device set to: " + device.deviceName + " (" + device.deviceAddress + ")");
     }
 
+    @Override
+    public void onAppDeviceFound(WifiP2pDevice device) {
+        Log.d(TAG, "App device found: " + device.deviceName);
+        // Add the device to the available devices list if it's not already there
+        boolean deviceExists = false;
+        for (WifiP2pDevice existingDevice : peers) {
+            if (existingDevice.deviceAddress.equals(device.deviceAddress)) {
+                deviceExists = true;
+                break;
+            }
+        }
+        
+        if (!deviceExists) {
+            peers.add(device);
+            runOnUiThread(() -> {
+                availableDevicesAdapter.clear();
+                for (WifiP2pDevice peer : peers) {
+                    String deviceInfo = peer.deviceName + "\n" + peer.deviceAddress;
+                    availableDevicesAdapter.add(deviceInfo);
+                }
+                availableDevicesAdapter.notifyDataSetChanged();
+            });
+        }
+    }
 
 }

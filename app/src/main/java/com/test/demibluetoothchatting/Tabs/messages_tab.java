@@ -66,6 +66,9 @@ import java.util.Collection;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
+import android.net.wifi.p2p.nsd.WifiP2pDnsSdServiceInfo;
+import android.net.wifi.p2p.nsd.WifiP2pServiceInfo;
+
 public class messages_tab extends Fragment implements WiFiDirectBroadcastReceiver.WiFiDirectHandler
 {
 
@@ -87,6 +90,13 @@ public class messages_tab extends Fragment implements WiFiDirectBroadcastReceive
     private boolean isFieldUser = false;
     private Handler autoSearchHandler = new Handler();
     private static final long AUTO_SEARCH_INTERVAL = 10000; // 10 secondes entre chaque recherche
+
+    private List<WifiP2pDevice> appDevices = new ArrayList<>();
+
+    private boolean isConnecting = false;
+    private String lastAttemptedConnection = null;
+    private static final long CONNECTION_COOLDOWN = 5000; // 5 seconds cooldown between connection attempts
+    private long lastConnectionAttempt = 0;
 
     public messages_tab() {}
 
@@ -164,10 +174,11 @@ public class messages_tab extends Fragment implements WiFiDirectBroadcastReceive
         try {
             manager = (WifiP2pManager) requireActivity().getSystemService(Context.WIFI_P2P_SERVICE);
             if (manager != null) {
-
                 channel = manager.initialize(requireActivity(), requireActivity().getMainLooper(), null);
                 if (channel != null) {
                     Log.d("MessagesTab", "Channel initialized successfully");
+                    // Setup service discovery
+                    setupServiceDiscovery();
                 } else {
                     Log.e("MessagesTab", "Failed to initialize channel");
                 }
@@ -396,12 +407,14 @@ public class messages_tab extends Fragment implements WiFiDirectBroadcastReceive
                         Toast.makeText(getContext(),
                                 "Failed to connect: " + getDetailedErrorMessage(reason),
                                 Toast.LENGTH_LONG).show();
+                        isConnecting = false;
                     }
                 });
             }
         } catch (SecurityException e) {
             Log.e("MessagesTab", "Security exception during connection: " + e.getMessage());
             Toast.makeText(getContext(), "Permission denied for connection", Toast.LENGTH_SHORT).show();
+            isConnecting = false;
         }
     }
 
@@ -519,16 +532,37 @@ public class messages_tab extends Fragment implements WiFiDirectBroadcastReceive
             availableDevicesAdapter.clear();
             TextView noAvailableDevicesText = requireView().findViewById(R.id.noAvailableDevicesText);
             
-            if (peers.isEmpty()) {
-                Log.d("WiFiDirect", "No devices found");
+            // Add all discovered peers to appDevices
+            for (WifiP2pDevice device : peers) {
+                // Skip local device
+                if (localDevice != null && device.deviceAddress.equals(localDevice.deviceAddress)) {
+                    Log.d("WiFiDirect", "Skipping local device: " + device.deviceName);
+                    continue;
+                }
+
+                // Add to appDevices if not already present
+                boolean deviceExists = false;
+                for (WifiP2pDevice existingDevice : appDevices) {
+                    if (existingDevice.deviceAddress.equals(device.deviceAddress)) {
+                        deviceExists = true;
+                        break;
+                    }
+                }
+                if (!deviceExists) {
+                    appDevices.add(device);
+                }
+            }
+
+            if (appDevices.isEmpty()) {
+                Log.d("WiFiDirect", "No app devices found");
                 noAvailableDevicesText.setVisibility(View.VISIBLE);
             } else {
                 noAvailableDevicesText.setVisibility(View.GONE);
 
-                // List to store available devices (not connected and not invited)
+                // List to store available app devices (not connected and not invited)
                 List<WifiP2pDevice> availableDevices = new ArrayList<>();
 
-                for (WifiP2pDevice device : peers) {
+                for (WifiP2pDevice device : appDevices) {
                     boolean alreadyConnected = false;
                     for (WifiP2pDevice connected : connectedPeers) {
                         if (connected.deviceAddress.equals(device.deviceAddress)) {
@@ -539,7 +573,7 @@ public class messages_tab extends Fragment implements WiFiDirectBroadcastReceive
 
                     if (!alreadyConnected) {
                         String deviceInfo = device.deviceName + "\n" + device.deviceAddress;
-                        Log.d("WiFiDirect", "Found device: " + deviceInfo);
+                        Log.d("WiFiDirect", "Found app device: " + deviceInfo);
                         availableDevicesAdapter.add(deviceInfo);
                         logDeviceStatus(device);
 
@@ -553,12 +587,24 @@ public class messages_tab extends Fragment implements WiFiDirectBroadcastReceive
                 }
 
                 // Automatically connect to the first available device
-                if (!availableDevices.isEmpty()) {
+                if (!availableDevices.isEmpty() && !isConnecting) {
                     WifiP2pDevice firstDevice = availableDevices.get(0);
-                    Log.d("MessagesTab", "Attempting automatic connection to: " + firstDevice.deviceName);
-                    connectToDevice(firstDevice.deviceAddress);
+                    long currentTime = System.currentTimeMillis();
+                    
+                    // Check if we're not in cooldown period and haven't recently tried to connect to this device
+                    if (currentTime - lastConnectionAttempt > CONNECTION_COOLDOWN && 
+                        !firstDevice.deviceAddress.equals(lastAttemptedConnection)) {
+                        
+                        Log.d("MessagesTab", "Attempting automatic connection to: " + firstDevice.deviceName);
+                        lastAttemptedConnection = firstDevice.deviceAddress;
+                        lastConnectionAttempt = currentTime;
+                        isConnecting = true;
+                        connectToDevice(firstDevice.deviceAddress);
+                    } else {
+                        Log.d("MessagesTab", "Skipping connection attempt - in cooldown or already attempted");
+                    }
                 } else {
-                    Log.d("MessagesTab", "No available devices found for connection (all are busy or already invited)");
+                    Log.d("MessagesTab", "No available app devices found for connection or already connecting");
                 }
             }
             availableDevicesAdapter.notifyDataSetChanged();
@@ -632,7 +678,7 @@ public class messages_tab extends Fragment implements WiFiDirectBroadcastReceive
                                     Log.d("MessagesTab", "Auto-opening chat with: " + device.deviceName);
                                     // Add a small delay before opening chat
                                     new Handler().postDelayed(() -> {
-                                        openChatFragment(device.deviceName, device.deviceAddress);
+                                    openChatFragment(device.deviceName, device.deviceAddress);
                                     }, 500);
                                     break;
                                 }
@@ -660,7 +706,7 @@ public class messages_tab extends Fragment implements WiFiDirectBroadcastReceive
                                 }
                             } else {
                                 Toast.makeText(getContext(), "Connection failed. Please try again.", Toast.LENGTH_LONG).show();
-                            }
+                    }
                         }, 2000);
                     }
                 }, 3000); // Increased delay to 3 seconds
@@ -738,9 +784,11 @@ public class messages_tab extends Fragment implements WiFiDirectBroadcastReceive
         if (networkInfo.isConnected()) {
             // We are connected, request connection info
             manager.requestConnectionInfo(channel, connectionInfoListener);
+            isConnecting = false;  // Reset connecting state when connection is established
         } else {
             // We are disconnected, clear the connected devices list
             connectedPeers.clear();
+            isConnecting = false;  // Reset connecting state when disconnected
             requireActivity().runOnUiThread(() -> {
                 connectedDevicesAdapter.clear();
                 connectedDevicesAdapter.add("No connected devices");
@@ -923,6 +971,56 @@ public class messages_tab extends Fragment implements WiFiDirectBroadcastReceive
                 ExistingWorkPolicy.REPLACE,
                 syncWork
         );
+    }
+
+    @Override
+    public void onAppDeviceFound(WifiP2pDevice device) {
+        Log.d("MessagesTab", "App device found: " + device.deviceName);
+        if (!appDevices.contains(device)) {
+            appDevices.add(device);
+            requireActivity().runOnUiThread(() -> {
+                availableDevicesAdapter.clear();
+                for (WifiP2pDevice appDevice : appDevices) {
+                    String deviceInfo = appDevice.deviceName + "\n" + appDevice.deviceAddress;
+                    availableDevicesAdapter.add(deviceInfo);
+                }
+                availableDevicesAdapter.notifyDataSetChanged();
+            });
+        }
+    }
+
+    private void setupServiceDiscovery() {
+        if (manager != null && channel != null) {
+            // Check for required permissions
+            if (ActivityCompat.checkSelfPermission(requireContext(), 
+                    Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+                Log.e("MessagesTab", "Location permission not granted for service discovery");
+                return;
+            }
+
+            // Register our service
+            WifiP2pDnsSdServiceInfo serviceInfo = WifiP2pDnsSdServiceInfo.newInstance(
+                "com.test.demibluetoothchatting",
+                "_presence._tcp",
+                null
+            );
+
+            try {
+                manager.addLocalService(channel, serviceInfo, new WifiP2pManager.ActionListener() {
+                    @Override
+                    public void onSuccess() {
+                        Log.d("MessagesTab", "Service registered successfully");
+                    }
+
+                    @Override
+                    public void onFailure(int reason) {
+                        Log.e("MessagesTab", "Failed to register service: " + reason);
+                    }
+                });
+            } catch (SecurityException e) {
+                Log.e("MessagesTab", "Security exception while registering service: " + e.getMessage());
+            }
+        }
     }
 
 }

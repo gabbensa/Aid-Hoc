@@ -1,9 +1,11 @@
 package com.test.demibluetoothchatting;
 
+import android.Manifest;
 import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.net.wifi.p2p.WifiP2pConfig;
 import android.net.wifi.p2p.WifiP2pDevice;
 import android.net.wifi.p2p.WifiP2pInfo;
@@ -24,6 +26,7 @@ import android.widget.Toast;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AlertDialog;
+import androidx.core.app.ActivityCompat;
 import androidx.fragment.app.Fragment;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
@@ -52,6 +55,7 @@ public class ChatFragment extends Fragment {
 
     private String deviceAddress;
     private String deviceName;
+    private boolean isDisconnecting = false;
 
     // Variable pour suivre si nous avons déjà ajouté un séparateur
     private boolean separatorAdded = false;
@@ -89,7 +93,7 @@ public class ChatFragment extends Fragment {
                 .setTitle("Disconnect")
                 .setMessage("Are you sure you want to disconnect from the chat?")
                 .setPositiveButton("Yes", (dialog, which) -> {
-                    disconnectFromChat();
+                    disconnect();
                 })
                 .setNegativeButton("No", null)
                 .show();
@@ -103,11 +107,11 @@ public class ChatFragment extends Fragment {
             deviceName = args.getString("device_name");
             deviceAddress = args.getString("device_address");
             txtDeviceName.setText(deviceName);
-            
+
             // Always create a new WifiP2pDevice when returning to chat
-            connectingDevice = new WifiP2pDevice();
-            connectingDevice.deviceName = deviceName;
-            connectingDevice.deviceAddress = deviceAddress;
+                connectingDevice = new WifiP2pDevice();
+                connectingDevice.deviceName = deviceName;
+                connectingDevice.deviceAddress = deviceAddress;
             
             loadMessagesFromDatabase(deviceName);
         }
@@ -352,8 +356,10 @@ public class ChatFragment extends Fragment {
         return new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(new java.util.Date());
     }
 
-    private void setStatus(String s) {
-        status.setText(s);
+    public void setStatus(String s) {
+        if (status != null) {
+            status.setText(s);
+        }
     }
 
     @Override
@@ -377,6 +383,21 @@ public class ChatFragment extends Fragment {
 
         // Informer ChatSocketHandler que ce fragment est détruit
         ChatSocketHandler.getInstance().setChatFragment(null);
+
+        if (isDisconnecting) {
+            // If we're disconnecting, make sure we clean up
+            ChatSocketHandler.getInstance().disconnect();
+            if (manager != null && channel != null) {
+                try {
+                    if (ActivityCompat.checkSelfPermission(requireContext(),
+                            Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+                        manager.removeGroup(channel, null);
+                    }
+                } catch (SecurityException e) {
+                    Log.e("ChatFragment", "Security exception in onDestroy: " + e.getMessage());
+                }
+            }
+        }
     }
 
     private void attemptReconnection() {
@@ -388,59 +409,63 @@ public class ChatFragment extends Fragment {
         }
     }
 
-    private void disconnectFromChat() {
-        // Notify the other device about disconnection
-        if (ChatSocketHandler.getInstance().isConnected()) {
-            ChatSocketHandler.getInstance().sendMessage("DISCONNECT_REQUEST");
-        }
-
-        // Clean up the socket connection
+    private void disconnect() {
+        Log.d("ChatFragment", "Disconnecting...");
+        isDisconnecting = true;
+        
+        // First close the socket connection
         ChatSocketHandler.getInstance().disconnect();
         
-        // Disconnect from WiFi Direct
+        // Then remove the group
         if (manager != null && channel != null) {
-            manager.removeGroup(channel, new WifiP2pManager.ActionListener() {
-                @Override
-                public void onSuccess() {
-                    Log.d("ChatFragment", "Successfully removed from WiFi Direct group");
-                    // After removing from group, cancel the connection
-                    manager.cancelConnect(channel, new WifiP2pManager.ActionListener() {
+            try {
+                if (ActivityCompat.checkSelfPermission(requireContext(), 
+                        Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+                    manager.removeGroup(channel, new WifiP2pManager.ActionListener() {
                         @Override
                         public void onSuccess() {
-                            Log.d("ChatFragment", "Successfully cancelled WiFi Direct connection");
-                            requireActivity().runOnUiThread(() -> {
-                                Toast.makeText(getActivity(), "Disconnected from chat", Toast.LENGTH_SHORT).show();
-                                // Return to previous screen
-                                if (getFragmentManager() != null) {
-                                    getFragmentManager().popBackStack();
-                                }
-                            });
+                            Log.d("ChatFragment", "Successfully removed group");
+                            // Navigate back to messages tab regardless of removeGroup success
+                            navigateBackToMessages();
                         }
 
                         @Override
                         public void onFailure(int reason) {
-                            Log.e("ChatFragment", "Failed to cancel WiFi Direct connection: " + reason);
-                            requireActivity().runOnUiThread(() -> {
-                                Toast.makeText(getActivity(), "Error disconnecting from WiFi Direct", Toast.LENGTH_SHORT).show();
-                            });
+                            Log.e("ChatFragment", "Failed to remove group: " + reason);
+                            // Still navigate back even if removeGroup fails
+                            navigateBackToMessages();
                         }
                     });
                 }
+            } catch (SecurityException e) {
+                Log.e("ChatFragment", "Security exception during disconnect: " + e.getMessage());
+                // Navigate back even if there's a security exception
+                navigateBackToMessages();
+            }
+        } else {
+            // If manager or channel is null, still try to navigate back
+            navigateBackToMessages();
+        }
+    }
 
-                @Override
-                public void onFailure(int reason) {
-                    Log.e("ChatFragment", "Failed to remove from WiFi Direct group: " + reason);
-                    requireActivity().runOnUiThread(() -> {
-                        Toast.makeText(getActivity(), "Error removing from group", Toast.LENGTH_SHORT).show();
-                    });
+    private void navigateBackToMessages() {
+        if (isAdded() && getActivity() != null) {
+            requireActivity().runOnUiThread(() -> {
+                try {
+                    // Clear any pending messages or states
+                    ChatSocketHandler.getInstance().disconnect();
+                    
+                    // Navigate back to messages tab
+                    requireActivity().getSupportFragmentManager().popBackStack();
+                    
+                    // Show a success message
+                    Toast.makeText(requireContext(), 
+                        "Disconnected successfully", 
+                        Toast.LENGTH_SHORT).show();
+                } catch (Exception e) {
+                    Log.e("ChatFragment", "Error navigating back: " + e.getMessage());
                 }
             });
-        } else {
-            // If manager or channel is null, just show the disconnection message and return
-            Toast.makeText(getActivity(), "Disconnected from chat", Toast.LENGTH_SHORT).show();
-            if (getFragmentManager() != null) {
-                getFragmentManager().popBackStack();
-            }
         }
     }
 }

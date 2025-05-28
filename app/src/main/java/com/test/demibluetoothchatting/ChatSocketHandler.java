@@ -30,6 +30,8 @@ public class ChatSocketHandler {
     private ChatFragment chatFragment;
     private InetAddress groupOwnerAddress;
     private static final String TAG = "ChatSocketHandler";
+    private InputStream inputStream;
+    private OutputStream outputStream;
 
     // Modifier le type de pendingMessages
     private List<String> pendingMessages = new ArrayList<>();
@@ -103,6 +105,11 @@ public class ChatSocketHandler {
                 Log.d(TAG, "Server socket created, waiting for client...");
                 socket = serverSocket.accept();
                 Log.d(TAG, "Client connected from: " + socket.getInetAddress().getHostAddress());
+                
+                // Initialize streams
+                inputStream = socket.getInputStream();
+                outputStream = socket.getOutputStream();
+                
                 readWriteThread = new ReadWriteThread(socket);
                 readWriteThread.start();
                 setConnected(true);
@@ -128,6 +135,11 @@ public class ChatSocketHandler {
                 socket = new Socket();
                 socket.connect(new InetSocketAddress(hostAddress, 8888), 10000);
                 Log.d(TAG, "Connected to server: " + hostAddress.getHostAddress());
+                
+                // Initialize streams
+                inputStream = socket.getInputStream();
+                outputStream = socket.getOutputStream();
+                
                 readWriteThread = new ReadWriteThread(socket);
                 readWriteThread.start();
                 setConnected(true);
@@ -374,6 +386,8 @@ public class ChatSocketHandler {
             
             mainHandler.post(() -> {
                 if (chatFragment != null) {
+                    // Update the status text to show disconnected
+                    chatFragment.setStatus("Disconnected");
                     Toast.makeText(chatFragment.getContext(), reason, Toast.LENGTH_LONG).show();
                 }
             });
@@ -434,6 +448,16 @@ public class ChatSocketHandler {
             if (serverSocket != null && !serverSocket.isClosed()) {
                 serverSocket.close();
                 serverSocket = null;
+            }
+            
+            if (inputStream != null) {
+                inputStream.close();
+                inputStream = null;
+            }
+            
+            if (outputStream != null) {
+                outputStream.close();
+                outputStream = null;
             }
             
             // Clear message lists

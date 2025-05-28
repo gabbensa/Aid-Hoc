@@ -9,6 +9,8 @@ import android.net.NetworkInfo;
 import android.net.wifi.p2p.WifiP2pDevice;
 import android.net.wifi.p2p.WifiP2pDeviceList;
 import android.net.wifi.p2p.WifiP2pManager;
+import android.net.wifi.p2p.nsd.WifiP2pDnsSdServiceRequest;
+import android.net.wifi.p2p.nsd.WifiP2pServiceInfo;
 import android.util.Log;
 import android.widget.Toast;
 import androidx.core.app.ActivityCompat;
@@ -39,6 +41,8 @@ public class WiFiDirectBroadcastReceiver extends BroadcastReceiver {
             Log.d(TAG, "P2P state changed - " + state);
             if (state == WifiP2pManager.WIFI_P2P_STATE_ENABLED) {
                 Log.d(TAG, "Wifi P2P is enabled");
+                // Setup service discovery when WiFi P2P is enabled
+                setupServiceDiscovery(context);
             } else {
                 Log.d(TAG, "Wifi P2P is disabled");
                 Toast.makeText(context, "⚠️ Please enable WiFi Direct", Toast.LENGTH_LONG).show();
@@ -126,12 +130,70 @@ public class WiFiDirectBroadcastReceiver extends BroadcastReceiver {
         }
     }
 
+    private void setupServiceDiscovery(Context context) {
+        if (manager != null && channel != null) {
+            // Check for required permissions
+            if (ActivityCompat.checkSelfPermission(context,
+                    Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+                Log.e(TAG, "Location permission not granted for service discovery");
+                return;
+            }
+
+            try {
+                // Add service discovery
+                manager.setDnsSdResponseListeners(channel,
+                    (instanceName, registrationType, deviceInfo) -> {
+                        if (instanceName.equals("com.test.demibluetoothchatting")) {
+                            Log.d(TAG, "Found app device: " + deviceInfo.deviceName);
+                            handler.onAppDeviceFound(deviceInfo);
+                        }
+                    },
+                    (fullDomainName, record, deviceInfo) -> {
+                        // Handle TXT record if needed
+                    }
+                );
+
+                // Add service discovery request
+                WifiP2pDnsSdServiceRequest serviceRequest = WifiP2pDnsSdServiceRequest.newInstance();
+                manager.addServiceRequest(channel, serviceRequest,
+                    new WifiP2pManager.ActionListener() {
+                        @Override
+                        public void onSuccess() {
+                            Log.d(TAG, "Service discovery request added successfully");
+                        }
+
+                        @Override
+                        public void onFailure(int reason) {
+                            Log.e(TAG, "Failed to add service discovery request: " + reason);
+                        }
+                    }
+                );
+
+                // Start service discovery
+                manager.discoverServices(channel, new WifiP2pManager.ActionListener() {
+                    @Override
+                    public void onSuccess() {
+                        Log.d(TAG, "Service discovery started successfully");
+                    }
+
+                    @Override
+                    public void onFailure(int reason) {
+                        Log.e(TAG, "Failed to start service discovery: " + reason);
+                    }
+                });
+            } catch (SecurityException e) {
+                Log.e(TAG, "Security exception during service discovery setup: " + e.getMessage());
+            }
+        }
+    }
+
     public interface WiFiDirectHandler {
         void updateLocalDevice(WifiP2pDevice device);
         void updateConnectedDevice(WifiP2pDevice device);
         void clearConnectedDevices();
         void onPeersAvailable(WifiP2pDeviceList peerList);
         void handleConnectionChanged(NetworkInfo networkInfo);
+        void onAppDeviceFound(WifiP2pDevice device);
     }
 }
 
