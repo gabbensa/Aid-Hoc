@@ -1,6 +1,7 @@
 package com.test.demibluetoothchatting;
 
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.view.View;
 import android.widget.Button;
@@ -65,7 +66,13 @@ public class SignupActivity extends AppCompatActivity {
                         Intent intent = new Intent(SignupActivity.this, LoginActivity.class);
                         startActivity(intent);
                         intent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_NEW_TASK);
-                        startActivity(intent);
+
+                        // After successful signup, save the username in SharedPreferences
+                        SharedPreferences prefs = getSharedPreferences("UserPrefs", MODE_PRIVATE);
+                        SharedPreferences.Editor editor = prefs.edit();
+                        editor.putString("userName", username);
+                        editor.apply();
+
                         finish(); // Close SignupActivity
 
                     } else {

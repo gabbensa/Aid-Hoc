@@ -65,6 +65,8 @@ public class ChatFragment extends Fragment {
     // Handler pour effacer la surbrillance après un délai
     private Handler highlightHandler = new Handler();
 
+    private String remoteUsername = null;
+
     @Nullable
     @Override
     public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup container, @Nullable Bundle savedInstanceState) {
@@ -79,7 +81,8 @@ public class ChatFragment extends Fragment {
         recyclerView = rootView.findViewById(R.id.list);
         recyclerView.setLayoutManager(new LinearLayoutManager(getActivity()));
         chatMessages = new ArrayList<>();
-        chatAdapter = new ChatAdapter(chatMessages, "This Device");
+        String currentUserName = getUserName();
+        chatAdapter = new ChatAdapter(chatMessages, currentUserName);
         recyclerView.setAdapter(chatAdapter);
         txtDeviceName = rootView.findViewById(R.id.txt_device_name);
 
@@ -107,12 +110,26 @@ public class ChatFragment extends Fragment {
             deviceName = args.getString("device_name");
             deviceAddress = args.getString("device_address");
             txtDeviceName.setText(deviceName);
-
-            // Always create a new WifiP2pDevice when returning to chat
-                connectingDevice = new WifiP2pDevice();
-                connectingDevice.deviceName = deviceName;
-                connectingDevice.deviceAddress = deviceAddress;
-            
+            connectingDevice = new WifiP2pDevice();
+            connectingDevice.deviceName = deviceName;
+            connectingDevice.deviceAddress = deviceAddress;
+            // Load the remote username before loading messages
+            loadRemoteUsername();
+            // If ChatSocketHandler has a pending remote username, set it now
+            ChatSocketHandler handler = ChatSocketHandler.getInstance();
+            java.lang.reflect.Field field = null;
+            try {
+                field = handler.getClass().getDeclaredField("pendingRemoteUsername");
+                field.setAccessible(true);
+                String pendingRemoteUsername = (String) field.get(handler);
+                if (pendingRemoteUsername != null) {
+                    setRemoteUsername(pendingRemoteUsername);
+                    field.set(handler, null);
+                    Log.d("ChatFragment", "Set pending remote username from handler: " + pendingRemoteUsername);
+                }
+            } catch (Exception e) {
+                Log.e("ChatFragment", "Reflection error accessing pendingRemoteUsername: " + e.getMessage());
+            }
             loadMessagesFromDatabase(deviceName);
         }
 
@@ -167,10 +184,20 @@ public class ChatFragment extends Fragment {
 
     private void loadMessagesFromDatabase(String deviceName) {
         String currentUserName = getUserName();
-        chatMessages = dbHelper.getMessagesForDevice(currentUserName, deviceName);
-        chatAdapter = new ChatAdapter(chatMessages, currentUserName);
-        recyclerView.setAdapter(chatAdapter);
-        recyclerView.scrollToPosition(chatMessages.size() - 1);
+        String remoteName = (remoteUsername != null) ? remoteUsername : deviceName;
+        
+        Log.d("ChatFragment", "Loading messages for: " + currentUserName + " and " + remoteName);
+        
+        // Get messages from database using usernames
+        ArrayList<ChatMessage> newMessages = dbHelper.getMessagesForDevice(currentUserName, remoteName);
+        
+        // Update the chat view
+        chatMessages.clear();
+        chatMessages.addAll(newMessages);
+        chatAdapter.notifyDataSetChanged();
+        if (!chatMessages.isEmpty()) {
+            recyclerView.scrollToPosition(chatMessages.size() - 1);
+        }
     }
 
     private void sendMessage(String message) {
@@ -206,18 +233,23 @@ public class ChatFragment extends Fragment {
     }
 
     private void sendMessageViaSocket(String message) {
+        if (remoteUsername == null) {
+            Log.w("ChatFragment", "Attempted to send message but remoteUsername is null!");
+            Toast.makeText(getActivity(), "Not ready, please wait for connection.", Toast.LENGTH_SHORT).show();
+            return;
+        }
         boolean sent = ChatSocketHandler.getInstance().sendMessage(message);
-
         if (sent) {
-            // Enregistrer le message dans la base de données
             if (connectingDevice != null) {
-                // Obtenir le nom d'utilisateur actuel au lieu d'utiliser "This Device"
                 String currentUserName = getUserName();
-
-                dbHelper.insertMessage(currentUserName, connectingDevice.deviceName, message, getCurrentTimestamp(), 0);
-                loadMessagesFromDatabase(connectingDevice.deviceName);
-
-                // Déclencher une synchronisation immédiate après l'envoi d'un message
+                String receiverName = remoteUsername;
+                String timestamp = getCurrentTimestamp();
+                Log.d("ChatFragment", "Saving message: sender=" + currentUserName + ", receiver=" + receiverName);
+                ChatMessage chatMessage = new ChatMessage(0, currentUserName, receiverName, message, timestamp);
+                chatMessages.add(chatMessage);
+                chatAdapter.notifyItemInserted(chatMessages.size() - 1);
+                recyclerView.scrollToPosition(chatMessages.size() - 1);
+                dbHelper.insertMessage(currentUserName, receiverName, message, timestamp, 0);
                 triggerImmediateSync();
             }
         } else {
@@ -281,7 +313,10 @@ public class ChatFragment extends Fragment {
             case MainActivity.message_write:
                 String writeMessage = new String((byte[]) msg.obj);
                 if (connectingDevice != null) {
-                    dbHelper.insertMessage("This Device", connectingDevice.deviceName, writeMessage, getCurrentTimestamp(), 0);
+                    String currentUserName = getUserName();
+                    String receiverName = remoteUsername;
+                    String timestamp = getCurrentTimestamp();
+                    dbHelper.insertMessage(currentUserName, receiverName, writeMessage, timestamp, 0);
                     loadMessagesFromDatabase(connectingDevice.deviceName);
                 }
                 break;
@@ -291,7 +326,10 @@ public class ChatFragment extends Fragment {
                     try {
                         String readMessage = new String((byte[]) msg.obj, 0, msg.arg1);
                         if (connectingDevice != null) {
-                            dbHelper.insertMessage(connectingDevice.deviceName, "This Device", readMessage, getCurrentTimestamp(), 0);
+                            String currentUserName = getUserName();
+                            String senderName = remoteUsername;
+                            String timestamp = getCurrentTimestamp();
+                            dbHelper.insertMessage(senderName, currentUserName, readMessage, timestamp, 0);
                             loadMessagesFromDatabase(connectingDevice.deviceName);
                         }
                     } catch (Exception e) {
@@ -319,25 +357,21 @@ public class ChatFragment extends Fragment {
 
     public void onMessageReceived(String message, boolean isDelayed) {
         requireActivity().runOnUiThread(() -> {
+            if (remoteUsername == null) {
+                Log.w("ChatFragment", "Attempted to receive message but remoteUsername is null!");
+                Toast.makeText(getActivity(), "Not ready, please wait for connection.", Toast.LENGTH_SHORT).show();
+                return;
+            }
             if (connectingDevice != null) {
-                // Add visual indication for delayed messages
-                String displayMessage = message;
-                if (isDelayed) {
-                    displayMessage =  message; // Add an envelope emoji for delayed messages
-                }
-
-                // Get current username
                 String currentUserName = getUserName();
-
-                // Insert message with timestamp
+                String senderName = remoteUsername;
                 String timestamp = getCurrentTimestamp();
-                dbHelper.insertMessage(connectingDevice.deviceName, currentUserName, displayMessage, timestamp, isDelayed ? 1 : 0);
-                
-                // Reload messages and scroll to bottom
-                loadMessagesFromDatabase(connectingDevice.deviceName);
+                Log.d("ChatFragment", "Saving message: sender=" + senderName + ", receiver=" + currentUserName);
+                dbHelper.insertMessage(senderName, currentUserName, message, timestamp, isDelayed ? 1 : 0);
+                ChatMessage chatMessage = new ChatMessage(0, senderName, currentUserName, message, timestamp);
+                chatMessages.add(chatMessage);
+                chatAdapter.notifyItemInserted(chatMessages.size() - 1);
                 recyclerView.scrollToPosition(chatMessages.size() - 1);
-                
-                // Show toast for delayed messages
                 if (isDelayed) {
                     Toast.makeText(getActivity(), "Received delayed message", Toast.LENGTH_SHORT).show();
                 }
@@ -365,11 +399,20 @@ public class ChatFragment extends Fragment {
     @Override
     public void onResume() {
         super.onResume();
+        ChatSocketHandler.getInstance().setChatFragment(this);
+        // Reload messages when resuming the fragment
+        if (connectingDevice != null) {
+            loadMessagesFromDatabase(connectingDevice.deviceName);
+        }
     }
 
     @Override
     public void onPause() {
         super.onPause();
+        // Save the current state
+        if (connectingDevice != null) {
+            loadMessagesFromDatabase(connectingDevice.deviceName);
+        }
     }
 
     @Override
@@ -467,6 +510,46 @@ public class ChatFragment extends Fragment {
                 }
             });
         }
+    }
+
+    public void setRemoteUsername(String username) {
+        Log.d("ChatFragment", "Remote username set to: " + username + ", deviceAddress: " + deviceAddress);
+        this.remoteUsername = username;
+        if (deviceAddress != null) {
+            SharedPreferences prefs = requireActivity().getSharedPreferences("UserPrefs", Context.MODE_PRIVATE);
+            prefs.edit().putString("remoteUsername_" + deviceAddress, username).apply();
+            Log.d("ChatFragment", "Saved remoteUsername_" + deviceAddress + " = " + username);
+        } else {
+            Log.w("ChatFragment", "deviceAddress is null when trying to save remote username!");
+        }
+        // Reload messages with the new username
+        if (connectingDevice != null) {
+            loadMessagesFromDatabase(connectingDevice.deviceName);
+        }
+    }
+
+    private void loadRemoteUsername() {
+        if (deviceAddress != null) {
+            SharedPreferences prefs = requireActivity().getSharedPreferences("UserPrefs", Context.MODE_PRIVATE);
+            this.remoteUsername = prefs.getString("remoteUsername_" + deviceAddress, null);
+            Log.d("ChatFragment", "Loaded remote username: " + this.remoteUsername);
+        }
+    }
+
+    public String getRemoteUsername() {
+        return remoteUsername;
+    }
+
+    // Helper to get username from prefs for a device
+    private String getUserNameFromPrefsForDevice(String deviceAddress, String fallback) {
+        if (deviceAddress == null) return fallback;
+        SharedPreferences prefs = requireActivity().getSharedPreferences("UserPrefs", Context.MODE_PRIVATE);
+        String username = prefs.getString("remoteUsername_" + deviceAddress, null);
+        return username != null ? username : fallback;
+    }
+
+    public String getDeviceAddress() {
+        return deviceAddress;
     }
 }
 

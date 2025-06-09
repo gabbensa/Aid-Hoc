@@ -7,7 +7,8 @@ import android.widget.Toast;
 import android.content.Context;
 import android.content.SharedPreferences;
 
-
+import org.json.JSONException;
+import org.json.JSONObject;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -18,8 +19,6 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.ArrayList;
 import java.util.List;
-
-
 
 public class ChatSocketHandler {
     private static ChatSocketHandler instance;
@@ -46,6 +45,10 @@ public class ChatSocketHandler {
     // Ajout d'une file d'attente pour les messages à envoyer quand la socket n'est pas prête
     private final List<String> pendingSystemMessages = new ArrayList<>();
 
+    // Add this field to the class
+    private String storedRemoteUsername = null;
+    private String pendingRemoteUsername = null;
+
     private ChatSocketHandler() {}
 
     public static synchronized ChatSocketHandler getInstance() {
@@ -57,12 +60,24 @@ public class ChatSocketHandler {
     
 
     public void setChatFragment(ChatFragment fragment) {
+        Log.d(TAG, "setChatFragment called. Fragment is " + (fragment != null ? "not null" : "null"));
         this.chatFragment = fragment;
+        // If you have a stored remote username, set it here
+        if (fragment != null && this.storedRemoteUsername != null) {
+            fragment.setRemoteUsername(this.storedRemoteUsername);
+            Log.d(TAG, "setChatFragment: Set stored remote username in fragment: " + this.storedRemoteUsername);
+            this.storedRemoteUsername = null;
+        }
+        // If there is a pending remote username and deviceAddress is set, set it now
+        if (fragment != null && pendingRemoteUsername != null && fragment.getDeviceAddress() != null) {
+            fragment.setRemoteUsername(pendingRemoteUsername);
+            Log.d(TAG, "setChatFragment: Set pending remote username in fragment: " + pendingRemoteUsername);
+            pendingRemoteUsername = null;
+        }
 
         // If a new fragment is set and we have pending messages, deliver them
         if (fragment != null && !pendingMessages.isEmpty()) {
             Log.d(TAG, "Delivering " + pendingMessages.size() + " pending messages to new fragment");
-
 
             // Create a copy of pending messages to avoid concurrent modification
             List<String> messagesToDeliver = new ArrayList<>(pendingMessages);
@@ -113,6 +128,15 @@ public class ChatSocketHandler {
                 readWriteThread = new ReadWriteThread(socket);
                 readWriteThread.start();
                 setConnected(true);
+                // Send handshake with username from SharedPreferences
+                String myUsername = null;
+                if (appContext != null) {
+                    SharedPreferences prefs = appContext.getSharedPreferences("UserPrefs", Context.MODE_PRIVATE);
+                    myUsername = prefs.getString("userName", null);
+                }
+                if (myUsername != null) {
+                    sendHandshake(myUsername);
+                }
                 // Envoyer les messages système en attente (dont REQUEST_USER_INFO)
                 flushPendingSystemMessages();
                 // Envoyer les informations d'utilisateur
@@ -143,6 +167,15 @@ public class ChatSocketHandler {
                 readWriteThread = new ReadWriteThread(socket);
                 readWriteThread.start();
                 setConnected(true);
+                // Send handshake with username from SharedPreferences
+                String myUsername = null;
+                if (appContext != null) {
+                    SharedPreferences prefs = appContext.getSharedPreferences("UserPrefs", Context.MODE_PRIVATE);
+                    myUsername = prefs.getString("userName", null);
+                }
+                if (myUsername != null) {
+                    sendHandshake(myUsername);
+                }
                 // Envoyer les messages système en attente (dont REQUEST_USER_INFO)
                 flushPendingSystemMessages();
                 // Envoyer les informations d'utilisateur
@@ -153,8 +186,6 @@ public class ChatSocketHandler {
             }
         }).start();
     }
-
-
 
     private void flushPendingSystemMessages() {
         if (readWriteThread != null && isConnected() && !pendingSystemMessages.isEmpty()) {
@@ -201,8 +232,6 @@ public class ChatSocketHandler {
             Log.e(TAG, "Error sending user info: " + e.getMessage(), e);
         }
     }
-
-
 
     // Modifié pour ne pas fermer les connexions existantes
     private void closeExistingConnections() {
@@ -348,6 +377,12 @@ public class ChatSocketHandler {
                         boolean isDelayed = message.startsWith("DELAYED:");
                         String messageToDeliver = isDelayed ? message.substring(8) : message;
 
+                        // Check if it's a handshake message
+                        if (messageToDeliver.contains("\"type\":\"handshake\"")) {
+                            handleHandshake(messageToDeliver);
+                            continue;
+                        }
+
                         mainHandler.post(() -> {
                             if (chatFragment != null) {
                                 try {
@@ -482,5 +517,38 @@ public class ChatSocketHandler {
 
     public void clearPendingMessages() {
         pendingChatMessages.clear();
+    }
+
+    public void sendHandshake(String username) {
+        try {
+            JSONObject handshake = new JSONObject();
+            handshake.put("type", "handshake");
+            handshake.put("username", username);
+            String handshakeMessage = handshake.toString();
+            Log.d(TAG, "Sending handshake: " + handshakeMessage);
+            sendMessage(handshakeMessage);
+        } catch (JSONException e) {
+            Log.e(TAG, "Failed to send handshake", e);
+        }
+    }
+
+    private void handleHandshake(String message) {
+        try {
+            JSONObject obj = new JSONObject(message);
+            if (obj.has("type") && obj.getString("type").equals("handshake")) {
+                String theirUsername = obj.getString("username");
+                Log.d(TAG, "Received handshake with username: " + theirUsername);
+                this.storedRemoteUsername = theirUsername;
+                if (chatFragment != null && chatFragment.getDeviceAddress() != null) {
+                    Log.d(TAG, "Setting remote username in fragment: " + theirUsername);
+                    chatFragment.setRemoteUsername(theirUsername);
+                } else {
+                    Log.d(TAG, "chatFragment is null or deviceAddress is null, storing username for later: " + theirUsername);
+                    pendingRemoteUsername = theirUsername;
+                }
+            }
+        } catch (JSONException e) {
+            Log.e(TAG, "Error parsing handshake message", e);
+        }
     }
 }

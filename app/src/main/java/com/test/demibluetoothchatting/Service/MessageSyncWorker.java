@@ -105,14 +105,13 @@ public class MessageSyncWorker extends Worker {
     }
 
     private void syncMessageToFirebase(ChatMessage message, String latitude, String longitude, String userName, CountDownLatch latch, boolean[] allSuccessful) {
-        // Utiliser le nom d'utilisateur pour le sender si c'est notre appareil
-        if (message.getSender().contains("This Device") || message.getSender().equals(android.os.Build.MODEL)) {
-            message.setSender(userName);
-        }
+        // Use sender and receiver as stored in the message
+        String sender = message.getSender();
+        String receiver = message.getReceiver();
 
-        // Sanitize device names and other identifiers for Firebase path
-        String sanitizedSender = sanitizeForFirebase(message.getSender());
-        String sanitizedReceiver = sanitizeForFirebase(message.getReceiver());
+        // Sanitize for Firebase
+        String sanitizedSender = sanitizeForFirebase(sender);
+        String sanitizedReceiver = sanitizeForFirebase(receiver);
 
         // Generate chat node with sanitized values
         String chatNode = generateChatNode(sanitizedSender, sanitizedReceiver);

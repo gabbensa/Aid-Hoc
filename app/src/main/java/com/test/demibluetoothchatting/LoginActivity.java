@@ -80,7 +80,7 @@ public class LoginActivity extends AppCompatActivity {
                     // Sauvegarder les informations d'utilisateur dans les SharedPreferences
                     SharedPreferences prefs = getSharedPreferences("UserPrefs", MODE_PRIVATE);
                     SharedPreferences.Editor editor = prefs.edit();
-                    editor.putString("username", username);
+                    editor.putString("userName", username);
                     editor.putString("deviceName", Build.MANUFACTURER + " " + Build.MODEL);
                     editor.apply();
 
