@@ -69,6 +69,9 @@ import java.util.concurrent.TimeUnit;
 import android.net.wifi.p2p.nsd.WifiP2pDnsSdServiceInfo;
 import android.net.wifi.p2p.nsd.WifiP2pServiceInfo;
 
+import java.util.HashSet;
+import java.util.Set;
+
 public class messages_tab extends Fragment implements WiFiDirectBroadcastReceiver.WiFiDirectHandler
 {
 
@@ -97,6 +100,16 @@ public class messages_tab extends Fragment implements WiFiDirectBroadcastReceive
     private String lastAttemptedConnection = null;
     private static final long CONNECTION_COOLDOWN = 5000; // 5 seconds cooldown between connection attempts
     private long lastConnectionAttempt = 0;
+
+    // Handler and Runnable for connection timeout
+    private Handler connectionTimeoutHandler = new Handler(Looper.getMainLooper());
+    private Runnable connectionTimeoutRunnable;
+    private static final int CONNECTION_TIMEOUT_MS = 7000; // 7 seconds
+    private int currentDeviceIndex = 0;
+
+    private Set<String> attemptedDeviceAddresses = new HashSet<>();
+    private List<WifiP2pDevice> lastAvailableDevices = new ArrayList<>();
+    private boolean isTryingDevices = false;
 
     public messages_tab() {}
 
@@ -165,10 +178,6 @@ public class messages_tab extends Fragment implements WiFiDirectBroadcastReceive
                 }
             }
         });
-
-        // Set up discover button
-        Button discoverButton = main_view.findViewById(R.id.discover_button);
-        discoverButton.setOnClickListener(v -> startDeviceDiscovery());
 
         // Initialize WiFi P2P
         try {
@@ -527,87 +536,79 @@ public class messages_tab extends Fragment implements WiFiDirectBroadcastReceive
         Log.d("WiFiDirect", "onPeersAvailable called. Peer count: " + peerList.getDeviceList().size());
         peers.clear();
         peers.addAll(peerList.getDeviceList());
-
         requireActivity().runOnUiThread(() -> {
             availableDevicesAdapter.clear();
+            // Remove or hide the noAvailableDevicesText TextView if present
             TextView noAvailableDevicesText = requireView().findViewById(R.id.noAvailableDevicesText);
-            
-            // Add all discovered peers to appDevices
+            if (noAvailableDevicesText != null) {
+                noAvailableDevicesText.setVisibility(View.GONE);
+            }
+            List<WifiP2pDevice> availableDevices = new ArrayList<>();
             for (WifiP2pDevice device : peers) {
                 // Skip local device
                 if (localDevice != null && device.deviceAddress.equals(localDevice.deviceAddress)) {
                     Log.d("WiFiDirect", "Skipping local device: " + device.deviceName);
                     continue;
                 }
-
-                // Add to appDevices if not already present
-                boolean deviceExists = false;
-                for (WifiP2pDevice existingDevice : appDevices) {
-                    if (existingDevice.deviceAddress.equals(device.deviceAddress)) {
-                        deviceExists = true;
+                boolean alreadyConnected = false;
+                for (WifiP2pDevice connected : connectedPeers) {
+                    if (connected.deviceAddress.equals(device.deviceAddress)) {
+                        alreadyConnected = true;
                         break;
                     }
                 }
-                if (!deviceExists) {
-                    appDevices.add(device);
-                }
-            }
-
-            if (appDevices.isEmpty()) {
-                Log.d("WiFiDirect", "No app devices found");
-                noAvailableDevicesText.setVisibility(View.VISIBLE);
-            } else {
-                noAvailableDevicesText.setVisibility(View.GONE);
-
-                // List to store available app devices (not connected and not invited)
-                List<WifiP2pDevice> availableDevices = new ArrayList<>();
-
-                for (WifiP2pDevice device : appDevices) {
-                    boolean alreadyConnected = false;
-                    for (WifiP2pDevice connected : connectedPeers) {
-                        if (connected.deviceAddress.equals(device.deviceAddress)) {
-                            alreadyConnected = true;
-                            break;
-                        }
-                    }
-
-                    if (!alreadyConnected) {
-                        String deviceInfo = device.deviceName + "\n" + device.deviceAddress;
-                        Log.d("WiFiDirect", "Found app device: " + deviceInfo);
-                        availableDevicesAdapter.add(deviceInfo);
-                        logDeviceStatus(device);
-
-                        // Only add to available devices list if they are truly available
-                        if (device.status == WifiP2pDevice.AVAILABLE) {
-                            availableDevices.add(device);
-                        }
-                    } else {
-                        Log.d("WiFiDirect", "Skipping device " + device.deviceName + " (already connected).");
-                    }
-                }
-
-                // Automatically connect to the first available device
-                if (!availableDevices.isEmpty() && !isConnecting) {
-                    WifiP2pDevice firstDevice = availableDevices.get(0);
-                    long currentTime = System.currentTimeMillis();
-                    
-                    // Check if we're not in cooldown period and haven't recently tried to connect to this device
-                    if (currentTime - lastConnectionAttempt > CONNECTION_COOLDOWN && 
-                        !firstDevice.deviceAddress.equals(lastAttemptedConnection)) {
-                        
-                        Log.d("MessagesTab", "Attempting automatic connection to: " + firstDevice.deviceName);
-                        lastAttemptedConnection = firstDevice.deviceAddress;
-                        lastConnectionAttempt = currentTime;
-                        isConnecting = true;
-                        connectToDevice(firstDevice.deviceAddress);
-                    } else {
-                        Log.d("MessagesTab", "Skipping connection attempt - in cooldown or already attempted");
+                if (!alreadyConnected) {
+                    String deviceInfo = device.deviceName + "\n" + device.deviceAddress;
+                    Log.d("WiFiDirect", "Found app device: " + deviceInfo);
+                    availableDevicesAdapter.add(deviceInfo);
+                    logDeviceStatus(device);
+                    if (device.status == WifiP2pDevice.AVAILABLE) {
+                        availableDevices.add(device);
                     }
                 } else {
-                    Log.d("MessagesTab", "No available app devices found for connection or already connecting");
+                    Log.d("WiFiDirect", "Skipping device " + device.deviceName + " (already connected).");
                 }
             }
+            lastAvailableDevices = availableDevices;
+            // Show 'No available devices' if the list is empty
+            if (availableDevicesAdapter.isEmpty()) {
+                availableDevicesAdapter.add("No available devices");
+            }
             availableDevicesAdapter.notifyDataSetChanged();
+            // Deterministic initiator logic: only the device with the smallest MAC address initiates
+            if (!availableDevices.isEmpty() && !isConnecting && localDevice != null && !isTryingDevices) {
+                attemptedDeviceAddresses.clear(); // Reset attempts for new round
+                WifiP2pDevice firstDevice = availableDevices.get(0);
+                String myMac = localDevice.deviceAddress;
+                String peerMac = firstDevice.deviceAddress;
+                if (myMac == null || peerMac == null) {
+                    Log.w("WiFiDirect", "MAC address missing, skipping initiator logic");
+                    return;
+                }
+                int cmp = myMac.compareToIgnoreCase(peerMac);
+                if (cmp < 0) {
+                    // This device initiates connection
+                    long currentTime = System.currentTimeMillis();
+                    if (currentTime - lastConnectionAttempt > CONNECTION_COOLDOWN) {
+                        Log.d("MessagesTab", "[INITIATOR] My MAC (" + myMac + ") < Peer MAC (" + peerMac + "). Initiating connection to all available devices.");
+                        lastConnectionAttempt = currentTime;
+                        isConnecting = true;
+                        isTryingDevices = true;
+                        tryConnectToNextDevice();
+                    } else {
+                        Log.d("MessagesTab", "[INITIATOR] Skipping connection attempt - in cooldown");
+                    }
+                } else if (cmp > 0) {
+                    // This device waits
+                    Log.d("MessagesTab", "[WAITER] My MAC (" + myMac + ") > Peer MAC (" + peerMac + "). Waiting for peer to connect.");
+                    Toast.makeText(getContext(), "Waiting for the other device to connect...", Toast.LENGTH_SHORT).show();
+                } else {
+                    // MACs are equal (should not happen)
+                    Log.w("MessagesTab", "[EQUAL MACS] Both devices have the same MAC address! Skipping connection.");
+                }
+            } else {
+                Log.d("MessagesTab", "No available app devices found for connection or already connecting");
+            }
         });
     }
 
@@ -782,13 +783,14 @@ public class messages_tab extends Fragment implements WiFiDirectBroadcastReceive
     // You'll need to modify your WiFiDirectBroadcastReceiver to call this method
     public void handleConnectionChanged(NetworkInfo networkInfo) {
         if (networkInfo.isConnected()) {
-            // We are connected, request connection info
             manager.requestConnectionInfo(channel, connectionInfoListener);
-            isConnecting = false;  // Reset connecting state when connection is established
+            isConnecting = false;
+            isTryingDevices = false;
+            if (connectionTimeoutRunnable != null) connectionTimeoutHandler.removeCallbacks(connectionTimeoutRunnable);
         } else {
-            // We are disconnected, clear the connected devices list
             connectedPeers.clear();
-            isConnecting = false;  // Reset connecting state when disconnected
+            isConnecting = false;
+            isTryingDevices = false;
             requireActivity().runOnUiThread(() -> {
                 connectedDevicesAdapter.clear();
                 connectedDevicesAdapter.add("No connected devices");
@@ -1021,6 +1023,57 @@ public class messages_tab extends Fragment implements WiFiDirectBroadcastReceive
                 Log.e("MessagesTab", "Security exception while registering service: " + e.getMessage());
             }
         }
+    }
+
+    private void tryConnectToNextDevice() {
+        // Always use the latest available devices and skip already attempted ones
+        List<WifiP2pDevice> untriedDevices = new ArrayList<>();
+        for (WifiP2pDevice device : lastAvailableDevices) {
+            if (!attemptedDeviceAddresses.contains(device.deviceAddress)) {
+                untriedDevices.add(device);
+            }
+        }
+        if (untriedDevices.isEmpty()) {
+            Log.d("MessagesTab", "No more untried devices to try or device list exhausted. Restarting auto-discovery in 2 seconds.");
+            isConnecting = false;
+            isTryingDevices = false;
+            attemptedDeviceAddresses.clear();
+            // Wait 2 seconds, then restart auto-discovery
+            new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                if (isAdded() && getActivity() != null) {
+                    startAutoDeviceDiscovery();
+                }
+            }, 2000);
+            return;
+        }
+        WifiP2pDevice device = untriedDevices.get(0);
+        Log.d("MessagesTab", "Trying to connect to device: " + device.deviceName + " (" + device.deviceAddress + ")");
+        isConnecting = true;
+        isTryingDevices = true;
+        attemptedDeviceAddresses.add(device.deviceAddress);
+        connectToDeviceWithTimeout(device.deviceAddress);
+    }
+
+    private void connectToDeviceWithTimeout(String deviceAddress) {
+        connectToDevice(deviceAddress);
+        // Cancel any previous timeout
+        if (connectionTimeoutRunnable != null) connectionTimeoutHandler.removeCallbacks(connectionTimeoutRunnable);
+        connectionTimeoutRunnable = () -> {
+            Log.d("MessagesTab", "Connection attempt timed out. Cancelling and trying next device.");
+            manager.cancelConnect(channel, new WifiP2pManager.ActionListener() {
+                @Override
+                public void onSuccess() {
+                    Log.d("MessagesTab", "Cancelled connection attempt successfully.");
+                    tryConnectToNextDevice();
+                }
+                @Override
+                public void onFailure(int reason) {
+                    Log.e("MessagesTab", "Failed to cancel connection: " + reason);
+                    tryConnectToNextDevice();
+                }
+            });
+        };
+        connectionTimeoutHandler.postDelayed(connectionTimeoutRunnable, CONNECTION_TIMEOUT_MS);
     }
 
 }

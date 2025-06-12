@@ -105,6 +105,16 @@ public class MessageSyncWorker extends Worker {
     }
 
     private void syncMessageToFirebase(ChatMessage message, String latitude, String longitude, String userName, CountDownLatch latch, boolean[] allSuccessful) {
+        // Only sync messages that were sent by the current user
+        if (!message.getSender().equals(userName)) {
+            // If this message was received (not sent by us), mark it as synced locally
+            // since it was already synced by the sender
+            db.markMessageAsSynced(message.getId());
+            Log.d("MessageSyncWorker", "Skipping sync of received message: " + message.getMessage());
+            latch.countDown();
+            return;
+        }
+
         // Use sender and receiver as stored in the message
         String sender = message.getSender();
         String receiver = message.getReceiver();
@@ -118,26 +128,30 @@ public class MessageSyncWorker extends Worker {
 
         Log.d("MessageSyncWorker", "Using chat node: " + chatNode);
 
-        // Vérifier d'abord si ce message existe déjà sur Firebase
-        firebaseDb.child(chatNode).orderByChild("timestamp").equalTo(message.getTimestamp())
+        // Check if this message already exists in Firebase
+        firebaseDb.child(chatNode)
+                .orderByChild("timestamp")
+                .equalTo(message.getTimestamp())
                 .addListenerForSingleValueEvent(new ValueEventListener() {
                     @Override
                     public void onDataChange(@NonNull DataSnapshot dataSnapshot) {
                         if (dataSnapshot.exists()) {
-                            // Le message existe déjà, marquer comme synchronisé localement
+                            // Message already exists in Firebase, mark as synced locally
                             db.markMessageAsSynced(message.getId());
                             Log.d("MessageSyncWorker", "Message already exists in Firebase, marked as synced locally: " + message.getMessage());
                             latch.countDown();
                         } else {
-                            // Le message n'existe pas encore, le synchroniser
+                            // Message doesn't exist, sync it
                             String messageId = firebaseDb.child(chatNode).push().getKey();
                             if (messageId != null) {
                                 firebaseDb.child(chatNode).child(messageId).setValue(message)
                                         .addOnCompleteListener(task -> {
                                             if (task.isSuccessful()) {
                                                 db.markMessageAsSynced(message.getId());
-                                                Log.d("MessageSyncWorker", "Synced: " + message.getMessage());
-                                                saveDeviceLocation(chatNode, sanitizedSender, latitude, longitude);
+                                                Log.d("MessageSyncWorker", "Synced new message: " + message.getMessage());
+                                                if (latitude != null && longitude != null) {
+                                                    saveDeviceLocation(chatNode, sanitizedSender, latitude, longitude);
+                                                }
                                             } else {
                                                 Log.e("MessageSyncWorker", "Sync failed: " + message.getMessage(), task.getException());
                                                 allSuccessful[0] = false;

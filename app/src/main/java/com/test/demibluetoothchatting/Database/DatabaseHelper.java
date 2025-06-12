@@ -7,11 +7,20 @@ import android.content.Context;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteOpenHelper;
+import android.util.Log;
 
+import androidx.annotation.NonNull;
+
+import com.google.firebase.database.DataSnapshot;
+import com.google.firebase.database.DatabaseError;
+import com.google.firebase.database.DatabaseReference;
+import com.google.firebase.database.FirebaseDatabase;
+import com.google.firebase.database.ValueEventListener;
 import com.test.demibluetoothchatting.ChatMessage;
 import com.test.demibluetoothchatting.User;
 
 import java.util.ArrayList;
+import java.util.Collections;
 
 // DatabaseHelper class for handling SQLite database operations such as user management and storing chat messages
 public class DatabaseHelper extends SQLiteOpenHelper {
@@ -37,7 +46,7 @@ public class DatabaseHelper extends SQLiteOpenHelper {
 
     // Constructor for initializing the database helper with the context and database name
     public DatabaseHelper(Context context) {
-        super(context, DATABASE_NAME, null, 5);
+        super(context, DATABASE_NAME, null, 6);
     }
 
     // onCreate is called when the database is created for the first time
@@ -210,6 +219,77 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         }
 
         return user; // Return the user object or null if not found
+    }
+
+    // Fetch all messages sorted by timestamp
+    @SuppressLint("Range")
+    public ArrayList<ChatMessage> getAllMessagesSortedByTimestamp() {
+        ArrayList<ChatMessage> messages = new ArrayList<>();
+        SQLiteDatabase db = this.getReadableDatabase();
+
+        // Query to get all messages sorted by timestamp
+        Cursor cursor = db.rawQuery("SELECT * FROM " + MESSAGE_TABLE_NAME + " ORDER BY TIMESTAMP ASC", null);
+
+        // Loop through the results and populate the messages list
+        if (cursor.moveToFirst()) {
+            do {
+                int messageId = cursor.getInt(cursor.getColumnIndex(MESSAGE_COL_1));
+                String messageContent = cursor.getString(cursor.getColumnIndex(MESSAGE_COL_4));
+                String messageSender = cursor.getString(cursor.getColumnIndex(MESSAGE_COL_2));
+                String messageReceiver = cursor.getString(cursor.getColumnIndex(MESSAGE_COL_3));
+                String timestamp = cursor.getString(cursor.getColumnIndex(MESSAGE_COL_5));
+
+                // Create a new ChatMessage object with the retrieved data
+                ChatMessage message = new ChatMessage(messageId, messageSender, messageReceiver, messageContent, timestamp);
+                messages.add(message); // Add message to the list
+            } while (cursor.moveToNext());
+        }
+
+        cursor.close(); // Close the cursor
+        return messages; // Return the list of messages
+    }
+
+    // Fetch all messages from Firebase
+    public void getAllMessagesFromFirebase(OnMessagesLoadedListener listener) {
+        DatabaseReference firebaseDb = FirebaseDatabase.getInstance().getReference("chatting_data");
+        ArrayList<ChatMessage> allMessages = new ArrayList<>();
+
+        firebaseDb.addListenerForSingleValueEvent(new ValueEventListener() {
+            @Override
+            public void onDataChange(@NonNull DataSnapshot snapshot) {
+                for (DataSnapshot chatNode : snapshot.getChildren()) {
+                    for (DataSnapshot messageSnapshot : chatNode.getChildren()) {
+                        try {
+                            String sender = messageSnapshot.child("sender").getValue(String.class);
+                            String receiver = messageSnapshot.child("receiver").getValue(String.class);
+                            String message = messageSnapshot.child("message").getValue(String.class);
+                            String timestamp = messageSnapshot.child("timestamp").getValue(String.class);
+
+                            if (sender != null && receiver != null && message != null && timestamp != null) {
+                                ChatMessage chatMessage = new ChatMessage(0, sender, receiver, message, timestamp);
+                                allMessages.add(chatMessage);
+                            }
+                        } catch (Exception e) {
+                            Log.e("DatabaseHelper", "Error parsing message: " + e.getMessage());
+                        }
+                    }
+                }
+                // Sort messages by timestamp
+                Collections.sort(allMessages, (m1, m2) -> m1.getTimestamp().compareTo(m2.getTimestamp()));
+                listener.onMessagesLoaded(allMessages);
+            }
+
+            @Override
+            public void onCancelled(@NonNull DatabaseError error) {
+                Log.e("DatabaseHelper", "Error loading messages: " + error.getMessage());
+                listener.onMessagesLoaded(new ArrayList<>());
+            }
+        });
+    }
+
+    // Interface for callback when messages are loaded
+    public interface OnMessagesLoadedListener {
+        void onMessagesLoaded(ArrayList<ChatMessage> messages);
     }
 
 }

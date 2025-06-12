@@ -84,6 +84,7 @@ public class ChatFragment extends Fragment {
         String currentUserName = getUserName();
         chatAdapter = new ChatAdapter(chatMessages, currentUserName);
         recyclerView.setAdapter(chatAdapter);
+        recyclerView.setItemAnimator(null);
         txtDeviceName = rootView.findViewById(R.id.txt_device_name);
 
         rootView.findViewById(R.id.btn_back).setOnClickListener(v -> {
@@ -166,19 +167,61 @@ public class ChatFragment extends Fragment {
 
     @SuppressLint("MissingPermission")
     private void connectToSelectedDevice(String deviceAddress) {
-        WifiP2pConfig config = new WifiP2pConfig();
-        config.deviceAddress = deviceAddress;
-
-        manager.connect(channel, config, new WifiP2pManager.ActionListener() {
-            @Override
-            public void onSuccess() {
-                Toast.makeText(getActivity(), "Connecting to " + deviceName, Toast.LENGTH_SHORT).show();
+        // First, check if we're already in a group
+        manager.requestGroupInfo(channel, group -> {
+            if (group != null && group.isGroupOwner()) {
+                // We're already a group owner, don't try to connect
+                Log.d("ChatFragment", "Already a group owner, waiting for client to connect");
+                return;
             }
 
-            @Override
-            public void onFailure(int reason) {
-                Toast.makeText(getActivity(), "Connection failed: " + reason, Toast.LENGTH_SHORT).show();
+            // Check if we're already connected to this device
+            if (group != null && group.getClientList().contains(connectingDevice)) {
+                Log.d("ChatFragment", "Already connected to this device");
+                return;
             }
+
+            // Remove any existing group first
+            manager.removeGroup(channel, new WifiP2pManager.ActionListener() {
+                @Override
+                public void onSuccess() {
+                    // Now try to connect
+                    WifiP2pConfig config = new WifiP2pConfig();
+                    config.deviceAddress = deviceAddress;
+                    
+                    // Add a small random delay to prevent simultaneous connection attempts
+                    new Handler().postDelayed(() -> {
+                        manager.connect(channel, config, new WifiP2pManager.ActionListener() {
+                            @Override
+                            public void onSuccess() {
+                                Log.d("ChatFragment", "Connection request sent to " + deviceName);
+                                setStatus("Connecting to " + deviceName);
+                            }
+
+                            @Override
+                            public void onFailure(int reason) {
+                                Log.e("ChatFragment", "Connection failed: " + reason);
+                                setStatus("Connection failed");
+                                // Try to reconnect after a delay
+                                new Handler().postDelayed(() -> {
+                                    if (isAdded() && !isDisconnecting) {
+                                        connectToSelectedDevice(deviceAddress);
+                                    }
+                                }, 3000);
+                            }
+                        });
+                    }, (long) (Math.random() * 1000)); // Random delay between 0-1 second
+                }
+
+                @Override
+                public void onFailure(int reason) {
+                    Log.e("ChatFragment", "Failed to remove group: " + reason);
+                    // Try to connect anyway
+                    WifiP2pConfig config = new WifiP2pConfig();
+                    config.deviceAddress = deviceAddress;
+                    manager.connect(channel, config, null);
+                }
+            });
         });
     }
 
@@ -468,25 +511,23 @@ public class ChatFragment extends Fragment {
                         @Override
                         public void onSuccess() {
                             Log.d("ChatFragment", "Successfully removed group");
-                            // Navigate back to messages tab regardless of removeGroup success
                             navigateBackToMessages();
                         }
 
                         @Override
                         public void onFailure(int reason) {
                             Log.e("ChatFragment", "Failed to remove group: " + reason);
-                            // Still navigate back even if removeGroup fails
+                            // Force disconnect by removing the group again
+                            manager.removeGroup(channel, null);
                             navigateBackToMessages();
                         }
                     });
                 }
             } catch (SecurityException e) {
                 Log.e("ChatFragment", "Security exception during disconnect: " + e.getMessage());
-                // Navigate back even if there's a security exception
                 navigateBackToMessages();
             }
         } else {
-            // If manager or channel is null, still try to navigate back
             navigateBackToMessages();
         }
     }
