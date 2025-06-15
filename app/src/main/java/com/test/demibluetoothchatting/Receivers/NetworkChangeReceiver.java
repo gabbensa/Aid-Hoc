@@ -10,9 +10,15 @@ import android.os.Handler;
 import android.widget.Toast;
 import androidx.work.OneTimeWorkRequest;
 import androidx.work.WorkManager;
+import androidx.work.Constraints;
+import androidx.work.NetworkType;
+import androidx.work.ExistingWorkPolicy;
 
 import com.test.demibluetoothchatting.Service.MessageSyncWorker;
-import com.test.demibluetoothchatting.Service.SyncService;
+import com.test.demibluetoothchatting.Database.DatabaseHelper;
+import com.test.demibluetoothchatting.ChatMessage;
+
+import java.util.ArrayList;
 
 // NetworkChangeReceiver listens for changes in network connectivity
 public class NetworkChangeReceiver extends BroadcastReceiver {
@@ -36,10 +42,30 @@ public class NetworkChangeReceiver extends BroadcastReceiver {
             if (isConnected && !isDebouncing) {
                 isDebouncing = true;
 
-                WorkManager.getInstance(context)
-                        .enqueue(new OneTimeWorkRequest.Builder(MessageSyncWorker.class).build());
+                // Check if there are any unsynced messages
+                DatabaseHelper dbHelper = new DatabaseHelper(context);
+                ArrayList<ChatMessage> unsyncedMessages = dbHelper.getUnsyncedMessages();
 
-                Toast.makeText(context, "Network Available - Sync Started", Toast.LENGTH_LONG).show();
+                if (!unsyncedMessages.isEmpty()) {
+                    // Create constraints to ensure network is available
+                    Constraints constraints = new Constraints.Builder()
+                            .setRequiredNetworkType(NetworkType.CONNECTED)
+                            .build();
+
+                    // Create and enqueue the sync work
+                    OneTimeWorkRequest syncWork = new OneTimeWorkRequest.Builder(MessageSyncWorker.class)
+                            .setConstraints(constraints)
+                            .build();
+
+                    WorkManager.getInstance(context)
+                            .enqueueUniqueWork(
+                                "network_sync_work",
+                                ExistingWorkPolicy.REPLACE,
+                                syncWork
+                            );
+
+                    Toast.makeText(context, "Network Available - Syncing Messages", Toast.LENGTH_LONG).show();
+                }
 
                 new Handler().postDelayed(() -> isDebouncing = false, DEBOUNCE_DELAY);
             }

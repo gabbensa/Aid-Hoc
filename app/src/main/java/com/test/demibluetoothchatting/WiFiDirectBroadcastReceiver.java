@@ -10,13 +10,11 @@ import android.net.wifi.p2p.WifiP2pDevice;
 import android.net.wifi.p2p.WifiP2pDeviceList;
 import android.net.wifi.p2p.WifiP2pManager;
 import android.net.wifi.p2p.nsd.WifiP2pDnsSdServiceRequest;
-import android.net.wifi.p2p.nsd.WifiP2pServiceInfo;
 import android.util.Log;
 import android.widget.Toast;
 import androidx.core.app.ActivityCompat;
 import android.content.SharedPreferences;
 
-import com.test.demibluetoothchatting.Database.DatabaseHelper;
 
 public class WiFiDirectBroadcastReceiver extends BroadcastReceiver {
     private static final String TAG = "WiFiDirectBR";

@@ -1,44 +1,23 @@
 package com.test.demibluetoothchatting.Tabs;
 
 // Import necessary Android components
-import android.Manifest;
+
 import android.annotation.SuppressLint;
-import android.content.BroadcastReceiver;
-import android.content.Context;
 import android.content.Intent;
-import android.content.IntentFilter;
-import android.content.pm.PackageManager;
-import android.graphics.Bitmap;
-import android.net.Uri;
 import android.os.Bundle;
-import android.provider.MediaStore;
-import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.ImageView;
-import android.widget.LinearLayout;
-import android.widget.RelativeLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import androidx.appcompat.app.AppCompatActivity;
 import androidx.cardview.widget.CardView;
-import androidx.core.app.ActivityCompat;
-import androidx.core.content.ContextCompat;
-import androidx.fragment.app.DialogFragment;
 import androidx.fragment.app.Fragment;
-import androidx.localbroadcastmanager.content.LocalBroadcastManager;
-
-import com.test.demibluetoothchatting.ActivityDashboard;
 import com.test.demibluetoothchatting.Controller;
 import com.test.demibluetoothchatting.Database.DatabaseHelper;
 import com.test.demibluetoothchatting.LoginActivity;
 import com.test.demibluetoothchatting.R;
 import com.test.demibluetoothchatting.User;
-
-import java.io.IOException;
-import java.util.ArrayList;
 
 // profile_tab fragment displays user profile information (name and username)
 public class profile_tab extends Fragment {
@@ -52,22 +31,13 @@ public class profile_tab extends Fragment {
     private static final String ARG_PARAM2 = "param2";
     private String mParam1;
     private String mParam2;
-    CardView btn_ad; // Example CardView button (could be used for adding an action)
 
     // Default constructor
     public profile_tab() {
 
     }
 
-    // Static method to create a new instance of profile_tab with parameters
-    public static profile_tab newInstance(String param1, String param2) {
-        profile_tab fragment = new profile_tab();
-        Bundle args = new Bundle();
-        args.putString(ARG_PARAM1, param1);
-        args.putString(ARG_PARAM2, param2);
-        fragment.setArguments(args);
-        return fragment;
-    }
+
 
     // Called when the fragment is created
     @Override

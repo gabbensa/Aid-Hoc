@@ -181,15 +181,4 @@ public class LoginActivity extends AppCompatActivity {
             Toast.makeText(this, "Session expired. Please log in again.", Toast.LENGTH_SHORT).show();
         }
     }
-
-    private String getMacAddress() {
-        try {
-            WifiManager wifiManager = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
-            WifiInfo wifiInfo = wifiManager.getConnectionInfo();
-            return wifiInfo.getMacAddress();
-        } catch (Exception e) {
-            Log.e("LoginActivity", "Error getting MAC address: " + e.getMessage());
-            return "00:00:00:00:00:00";
-        }
-    }
 }

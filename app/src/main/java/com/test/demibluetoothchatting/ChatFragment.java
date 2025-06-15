@@ -3,22 +3,18 @@ package com.test.demibluetoothchatting;
 import android.Manifest;
 import android.annotation.SuppressLint;
 import android.content.Context;
-import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.net.wifi.p2p.WifiP2pConfig;
 import android.net.wifi.p2p.WifiP2pDevice;
-import android.net.wifi.p2p.WifiP2pInfo;
 import android.net.wifi.p2p.WifiP2pManager;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
-import android.os.Message;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.Button;
 import android.widget.EditText;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -57,12 +53,6 @@ public class ChatFragment extends Fragment {
     private String deviceName;
     private boolean isDisconnecting = false;
 
-    // Variable pour suivre si nous avons déjà ajouté un séparateur
-    private boolean separatorAdded = false;
-
-    // Liste pour stocker les nouveaux messages
-    private List<String> newMessages = new ArrayList<>();
-    // Handler pour effacer la surbrillance après un délai
     private Handler highlightHandler = new Handler();
 
     private String remoteUsername = null;
@@ -104,7 +94,7 @@ public class ChatFragment extends Fragment {
         });
 
         controller = new Controller(handler);
-        ChatSocketHandler.getInstance().setChatFragment(this);
+        ChatSocketHandler.getInstance().setChatFragment(this, manager, channel);
 
         Bundle args = getArguments();
         if (args != null) {
@@ -234,13 +224,15 @@ public class ChatFragment extends Fragment {
         // Get messages from database using usernames
         ArrayList<ChatMessage> newMessages = dbHelper.getMessagesForDevice(currentUserName, remoteName);
         
-        // Update the chat view
-        chatMessages.clear();
-        chatMessages.addAll(newMessages);
-        chatAdapter.notifyDataSetChanged();
-        if (!chatMessages.isEmpty()) {
-            recyclerView.scrollToPosition(chatMessages.size() - 1);
-        }
+        // Update the chat view on UI thread
+        requireActivity().runOnUiThread(() -> {
+            chatMessages.clear();
+            chatMessages.addAll(newMessages);
+            chatAdapter.notifyDataSetChanged();
+            if (!chatMessages.isEmpty()) {
+                recyclerView.scrollToPosition(chatMessages.size() - 1);
+            }
+        });
     }
 
     private void sendMessage(String message) {
@@ -289,9 +281,11 @@ public class ChatFragment extends Fragment {
                 String timestamp = getCurrentTimestamp();
                 Log.d("ChatFragment", "Saving message: sender=" + currentUserName + ", receiver=" + receiverName);
                 ChatMessage chatMessage = new ChatMessage(0, currentUserName, receiverName, message, timestamp);
-                chatMessages.add(chatMessage);
-                chatAdapter.notifyItemInserted(chatMessages.size() - 1);
-                recyclerView.scrollToPosition(chatMessages.size() - 1);
+                requireActivity().runOnUiThread(() -> {
+                    chatMessages.add(chatMessage);
+                    chatAdapter.notifyItemInserted(chatMessages.size() - 1);
+                    recyclerView.scrollToPosition(chatMessages.size() - 1);
+                });
                 dbHelper.insertMessage(currentUserName, receiverName, message, timestamp, 0);
                 triggerImmediateSync();
             }
@@ -424,10 +418,6 @@ public class ChatFragment extends Fragment {
         });
     }
 
-    // Gardez la méthode originale pour la compatibilité
-    public void onMessageReceived(String message) {
-        onMessageReceived(message, false);
-    }
 
     private String getCurrentTimestamp() {
         return new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(new java.util.Date());
@@ -442,7 +432,7 @@ public class ChatFragment extends Fragment {
     @Override
     public void onResume() {
         super.onResume();
-        ChatSocketHandler.getInstance().setChatFragment(this);
+        ChatSocketHandler.getInstance().setChatFragment(this, manager, channel);
         // Reload messages when resuming the fragment
         if (connectingDevice != null) {
             loadMessagesFromDatabase(connectingDevice.deviceName);
@@ -469,30 +459,6 @@ public class ChatFragment extends Fragment {
 
         // Informer ChatSocketHandler que ce fragment est détruit
         ChatSocketHandler.getInstance().setChatFragment(null);
-
-        if (isDisconnecting) {
-            // If we're disconnecting, make sure we clean up
-            ChatSocketHandler.getInstance().disconnect();
-            if (manager != null && channel != null) {
-                try {
-                    if (ActivityCompat.checkSelfPermission(requireContext(),
-                            Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
-                        manager.removeGroup(channel, null);
-                    }
-                } catch (SecurityException e) {
-                    Log.e("ChatFragment", "Security exception in onDestroy: " + e.getMessage());
-                }
-            }
-        }
-    }
-
-    private void attemptReconnection() {
-        if (connectingDevice != null) {
-            Log.d("ChatFragment", "Attempting to reconnect...");
-            new Handler(Looper.getMainLooper()).postDelayed(() -> {
-                connectToSelectedDevice(connectingDevice.deviceAddress);
-            }, 5000); // Attendre 5 secondes avant de réessayer
-        }
     }
 
     private void disconnect() {
@@ -532,12 +498,12 @@ public class ChatFragment extends Fragment {
         }
     }
 
-    private void navigateBackToMessages() {
+    public void navigateBackToMessages() {
         if (isAdded() && getActivity() != null) {
             requireActivity().runOnUiThread(() -> {
                 try {
-                    // Clear any pending messages or states
-                    ChatSocketHandler.getInstance().disconnect();
+                    // Removed: Clear any pending messages or states
+                    // ChatSocketHandler.getInstance().disconnect();
                     
                     // Navigate back to messages tab
                     requireActivity().getSupportFragmentManager().popBackStack();
@@ -575,18 +541,6 @@ public class ChatFragment extends Fragment {
             this.remoteUsername = prefs.getString("remoteUsername_" + deviceAddress, null);
             Log.d("ChatFragment", "Loaded remote username: " + this.remoteUsername);
         }
-    }
-
-    public String getRemoteUsername() {
-        return remoteUsername;
-    }
-
-    // Helper to get username from prefs for a device
-    private String getUserNameFromPrefsForDevice(String deviceAddress, String fallback) {
-        if (deviceAddress == null) return fallback;
-        SharedPreferences prefs = requireActivity().getSharedPreferences("UserPrefs", Context.MODE_PRIVATE);
-        String username = prefs.getString("remoteUsername_" + deviceAddress, null);
-        return username != null ? username : fallback;
     }
 
     public String getDeviceAddress() {

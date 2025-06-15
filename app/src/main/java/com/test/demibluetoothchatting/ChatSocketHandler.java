@@ -20,6 +20,8 @@ import java.net.Socket;
 import java.util.ArrayList;
 import java.util.List;
 
+import android.net.wifi.p2p.WifiP2pManager;
+
 public class ChatSocketHandler {
     private static ChatSocketHandler instance;
     private Socket socket;
@@ -49,6 +51,10 @@ public class ChatSocketHandler {
     private String storedRemoteUsername = null;
     private String pendingRemoteUsername = null;
 
+    // Add fields to store WifiP2pManager and Channel
+    private WifiP2pManager manager;
+    private WifiP2pManager.Channel channel;
+
     private ChatSocketHandler() {}
 
     public static synchronized ChatSocketHandler getInstance() {
@@ -59,9 +65,11 @@ public class ChatSocketHandler {
     }
     
 
-    public void setChatFragment(ChatFragment fragment) {
+    public void setChatFragment(ChatFragment fragment, WifiP2pManager manager, WifiP2pManager.Channel channel) {
         Log.d(TAG, "setChatFragment called. Fragment is " + (fragment != null ? "not null" : "null"));
         this.chatFragment = fragment;
+        this.manager = manager;
+        this.channel = channel;
         // If you have a stored remote username, set it here
         if (fragment != null && this.storedRemoteUsername != null) {
             fragment.setRemoteUsername(this.storedRemoteUsername);
@@ -93,6 +101,11 @@ public class ChatSocketHandler {
                 }, i * 100); // 100ms delay between messages
             }
         }
+    }
+
+    // Overload for backward compatibility
+    public void setChatFragment(ChatFragment fragment) {
+        setChatFragment(fragment, null, null);
     }
 
     public boolean isConnected() {
@@ -260,7 +273,7 @@ public class ChatSocketHandler {
     public void setOtherDeviceInChat(boolean inChat) {
         this.otherDeviceInChat = inChat;
         Log.d(TAG, "Other device in chat: " + inChat);
-        
+
         // Si l'autre appareil revient dans le chat, envoyez les messages non livrés
         if (inChat && !undeliveredMessages.isEmpty()) {
             sendUndeliveredMessages();
@@ -419,11 +432,31 @@ public class ChatSocketHandler {
             isRunning = false;
             setConnected(false);
             
+            // Remove the Wi-Fi Direct group if possible
+            if (manager != null && channel != null) {
+                try {
+                    manager.removeGroup(channel, new WifiP2pManager.ActionListener() {
+                        @Override
+                        public void onSuccess() {
+                            Log.d(TAG, "Group removed due to disconnection");
+                        }
+                        @Override
+                        public void onFailure(int reason) {
+                            Log.e(TAG, "Failed to remove group on disconnection: " + reason);
+                        }
+                    });
+                } catch (Exception e) {
+                    Log.e(TAG, "Exception while removing group on disconnection: " + e.getMessage());
+                }
+            }
+
             mainHandler.post(() -> {
                 if (chatFragment != null) {
                     // Update the status text to show disconnected
                     chatFragment.setStatus("Disconnected");
                     Toast.makeText(chatFragment.getContext(), reason, Toast.LENGTH_LONG).show();
+                    // Close the chat and return to messages tab
+                    chatFragment.navigateBackToMessages();
                 }
             });
         }
@@ -454,12 +487,6 @@ public class ChatSocketHandler {
         Log.d(TAG, "Group owner address set to: " + address.getHostAddress());
     }
 
-    // Modifié pour ne pas fermer les connexions
-    public void closeConnection() {
-        Log.d(TAG, "closeConnection called - keeping socket open for future use");
-        // Ne fermez pas les connexions ici, juste marquer que le fragment n'est plus disponible
-        chatFragment = null;
-    }
 
     public void setAppContext(Context context) {
         this.appContext = context.getApplicationContext();
@@ -468,6 +495,24 @@ public class ChatSocketHandler {
     public void disconnect() {
         Log.d(TAG, "Disconnecting all connections");
         setConnected(false);
+        
+        // Remove the Wi-Fi Direct group if possible
+        if (manager != null && channel != null) {
+            try {
+                manager.removeGroup(channel, new WifiP2pManager.ActionListener() {
+                    @Override
+                    public void onSuccess() {
+                        Log.d(TAG, "Group removed during disconnect");
+                    }
+                    @Override
+                    public void onFailure(int reason) {
+                        Log.e(TAG, "Failed to remove group during disconnect: " + reason);
+                    }
+                });
+            } catch (Exception e) {
+                Log.e(TAG, "Exception while removing group during disconnect: " + e.getMessage());
+            }
+        }
         
         try {
             if (readWriteThread != null) {
@@ -506,18 +551,6 @@ public class ChatSocketHandler {
         }
     }
 
-    public void setPendingMessages(ArrayList<ChatMessage> messages) {
-        this.pendingChatMessages = messages;
-        Log.d(TAG, "Set " + messages.size() + " pending chat messages");
-    }
-
-    public ArrayList<ChatMessage> getPendingMessages() {
-        return new ArrayList<>(pendingChatMessages);
-    }
-
-    public void clearPendingMessages() {
-        pendingChatMessages.clear();
-    }
 
     public void sendHandshake(String username) {
         try {

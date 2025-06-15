@@ -1,5 +1,7 @@
 package com.test.demibluetoothchatting.Tabs;
 
+import static android.app.PendingIntent.getActivity;
+
 import android.Manifest;
 import android.annotation.SuppressLint;
 import android.content.Context;
@@ -732,15 +734,16 @@ public class messages_tab extends Fragment implements WiFiDirectBroadcastReceive
                 connectedDeviceAddresses.add(device.deviceAddress);
             }
             // Retirer cet appareil de la liste des Available Devices
-            for (int i = 0; i < availableDevicesAdapter.getCount(); i++) {
-                String item = availableDevicesAdapter.getItem(i);
-                if (item != null && item.contains(device.deviceAddress)) {
-                    availableDevicesAdapter.remove(item);
-                    break;
-                }
-            }
-            availableDevicesAdapter.notifyDataSetChanged();
             requireActivity().runOnUiThread(() -> {
+                for (int i = 0; i < availableDevicesAdapter.getCount(); i++) {
+                    String item = availableDevicesAdapter.getItem(i);
+                    if (item != null && item.contains(device.deviceAddress)) {
+                        availableDevicesAdapter.remove(item);
+                        break;
+                    }
+                }
+                availableDevicesAdapter.notifyDataSetChanged();
+                
                 connectedDevicesAdapter.clear();
                 for (WifiP2pDevice connectedDevice : connectedPeers) {
                     String deviceInfo = connectedDevice.deviceName + "\n" + connectedDevice.deviceAddress;
@@ -780,7 +783,6 @@ public class messages_tab extends Fragment implements WiFiDirectBroadcastReceive
 
 
     // Update your broadcast receiver to handle connection changes
-    // You'll need to modify your WiFiDirectBroadcastReceiver to call this method
     public void handleConnectionChanged(NetworkInfo networkInfo) {
         if (networkInfo.isConnected()) {
             manager.requestConnectionInfo(channel, connectionInfoListener);
@@ -796,6 +798,13 @@ public class messages_tab extends Fragment implements WiFiDirectBroadcastReceive
                 connectedDevicesAdapter.add("No connected devices");
                 connectedDevicesAdapter.notifyDataSetChanged();
             });
+
+            // Restart auto-discovery when disconnected
+            new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                if (isAdded() && !isDetached()) {  // Check if fragment is still attached
+                    startAutoDeviceDiscovery();
+                }
+            }, 1000);  // Wait 1 second before restarting discovery
         }
     }
 

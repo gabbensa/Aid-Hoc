@@ -21,9 +21,7 @@ public class ActivityDashboard extends AppCompatActivity implements TabLayout.On
     private ViewPager2 viewPager;
     private LinearLayout linearLayout_main;
     private RelativeLayout root_layout;
-    private boolean isDropdownVisible = false;
-    private String name, image_url;
-    private boolean isAdLoaded = false;
+
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {

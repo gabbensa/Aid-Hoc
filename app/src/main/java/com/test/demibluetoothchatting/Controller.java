@@ -2,7 +2,6 @@ package com.test.demibluetoothchatting;
 
 import android.content.Context;
 import android.content.SharedPreferences;
-import android.net.wifi.p2p.WifiP2pManager;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
@@ -62,21 +61,6 @@ public class Controller {
         }
     }
 
-    public synchronized void connect(String groupOwnerAddress) {
-        if (state == CONNECTING) {
-            if (connectThread != null) {
-                connectThread.cancel();
-                connectThread = null;
-            }
-        }
-        if (readWriteThread != null) {
-            readWriteThread.cancel();
-            readWriteThread = null;
-        }
-        connectThread = new ConnectThread(groupOwnerAddress);
-        connectThread.start();
-        setState(CONNECTING);
-    }
 
     public synchronized void connected(Socket socket) {
         // Annule les autres threads pour établir la nouvelle connexion

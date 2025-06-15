@@ -1,6 +1,6 @@
 package com.test.demibluetoothchatting;
 
-import android.content.Intent;
+
 import android.os.Bundle;
 import android.util.Log;
 import android.view.LayoutInflater;
@@ -17,14 +17,8 @@ import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 import androidx.viewpager2.adapter.FragmentStateAdapter;
 import androidx.viewpager2.widget.ViewPager2;
-
-import com.firebase.ui.database.FirebaseRecyclerAdapter;
-import com.firebase.ui.database.FirebaseRecyclerOptions;
 import com.google.android.material.tabs.TabLayout;
 import com.google.android.material.tabs.TabLayoutMediator;
-import com.google.firebase.database.DatabaseReference;
-import com.google.firebase.database.FirebaseDatabase;
-import com.google.firebase.database.Query;
 import com.test.demibluetoothchatting.Adapters.AllMessagesAdapter;
 import com.test.demibluetoothchatting.Database.DatabaseHelper;
 import com.test.demibluetoothchatting.Tabs.profile_tab;
@@ -146,18 +140,25 @@ public class RoomManagementActivity extends AppCompatActivity {
         }
 
         private void loadAllMessages() {
-            progressBar.setVisibility(View.VISIBLE);
             dbHelper.getAllMessagesFromFirebase(new DatabaseHelper.OnMessagesLoadedListener() {
                 @Override
                 public void onMessagesLoaded(ArrayList<ChatMessage> messages) {
                     requireActivity().runOnUiThread(() -> {
-                        allMessages = messages;
-                        if (adapter == null) {
-                            adapter = new AllMessagesAdapter(allMessages);
-                            recyclerViewMessages.setAdapter(adapter);
-                        } else {
-                            adapter.updateMessages(allMessages);
+                        // Filter duplicates: use a Set with a composite key
+                        java.util.Set<String> seen = new java.util.HashSet<>();
+                        ArrayList<ChatMessage> uniqueMessages = new ArrayList<>();
+                        for (ChatMessage msg : messages) {
+                            String key = msg.getSender() + "|" + msg.getReceiver() + "|" + msg.getTimestamp() + "|" + msg.getMessage();
+                            if (!seen.contains(key)) {
+                                seen.add(key);
+                                uniqueMessages.add(msg);
+                            }
                         }
+                        allMessages = uniqueMessages;
+                        // Reverse the list so latest messages appear on top
+                        java.util.Collections.reverse(allMessages);
+                        adapter = new AllMessagesAdapter(allMessages);
+                        recyclerViewMessages.setAdapter(adapter);
                         progressBar.setVisibility(View.GONE);
                     });
                 }
@@ -165,19 +166,10 @@ public class RoomManagementActivity extends AppCompatActivity {
         }
 
         private void filterMessages(String query) {
-            if (query.isEmpty()) {
-                adapter.updateMessages(allMessages);
-            } else {
-                List<ChatMessage> filteredMessages = new ArrayList<>();
-                String lowerQuery = query.toLowerCase();
-                for (ChatMessage message : allMessages) {
-                    if (message.getMessage().toLowerCase().contains(lowerQuery) ||
-                        message.getSender().toLowerCase().contains(lowerQuery) ||
-                        message.getReceiver().toLowerCase().contains(lowerQuery)) {
-                        filteredMessages.add(message);
-                    }
-                }
-                adapter.updateMessages(filteredMessages);
+            if (adapter != null) {
+                requireActivity().runOnUiThread(() -> {
+                    adapter.setSearchQuery(query);
+                });
             }
         }
 
